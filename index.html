@@ -5,14 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Golf Trip Live Scoring</title>
 
-  <!-- Tailwind CSS & Lucide Icons via CDN (No build step required) -->
+  <!-- Tailwind CSS, React, and Babel Standalone (Zero-Build CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
-    /* Prevent pull-to-refresh on mobile and smooth scrollbar */
     body {
       overscroll-behavior-y: none;
       -webkit-tap-highlight-color: transparent;
@@ -26,7 +25,7 @@
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 overflow-hidden font-sans">
+<body class="bg-slate-950 text-slate-100 overflow-hidden font-sans select-none">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -79,23 +78,41 @@
           { num: 17, par: 3, hcp: 15, yardage: 178 },
           { num: 18, par: 5, hcp: 3, yardage: 543 }
         ]
+      },
+      executive9: {
+        name: "Cypress Dunes (9-Hole Executive)",
+        holes: [
+          { num: 1, par: 4, hcp: 3, yardage: 335 },
+          { num: 2, par: 3, hcp: 7, yardage: 150 },
+          { num: 3, par: 4, hcp: 1, yardage: 385 },
+          { num: 4, par: 5, hcp: 5, yardage: 490 },
+          { num: 5, par: 3, hcp: 9, yardage: 165 },
+          { num: 6, par: 4, hcp: 2, yardage: 360 },
+          { num: 7, par: 4, hcp: 6, yardage: 340 },
+          { num: 8, par: 3, hcp: 8, yardage: 140 },
+          { num: 9, par: 5, hcp: 4, yardage: 510 }
+        ]
       }
     };
 
     const GAME_TYPES = [
-      { id: 'best_ball', name: 'Best Ball (Four-Ball)', desc: 'Lowest gross or net score among teammates counts as the team score on each hole.' },
+      { id: 'best_ball', name: 'Best Ball (Four-Ball)', desc: 'Lowest score among teammates counts as the team score on each hole.' },
       { id: 'scramble', name: 'Scramble', desc: 'All players tee off, best shot chosen, all play from there until holed.' },
-      { id: 'vegas', name: 'Vegas (High-Low)', desc: 'Scores of 2 teammates concatenate (e.g. 4 and 5 make 45). Birdie flips opponent score!' },
-      { id: 'skins', name: 'Skins with Carryovers', desc: 'Lowest unique score wins the hole skin. Ties carry over to increase the next hole value.' },
+      { id: 'vegas', name: 'Vegas (High-Low)', desc: 'Scores of 2 teammates concatenate (e.g. 4 and 5 make 45). Birdie flips opponent’s score high-first!' },
+      { id: 'skins', name: 'Skins with Carryovers', desc: 'Lowest unique score wins the skin. Ties carry over to next hole.' },
       { id: 'wolf', name: 'Wolf (Rotating Captain)', desc: 'Player has honor, watches drives, selects partner or goes Lone Wolf.' },
-      { id: 'stableford', name: 'Stableford', desc: 'Points awarded per hole: Dbl Bogey=0, Bogey=1, Par=2, Birdie=3, Eagle=4.' },
-      { id: 'nassau', name: 'Nassau (2-2-2)', desc: 'Three matches in one: Front 9 winner, Back 9 winner, and Total 18 winner.' },
-      { id: 'quota', name: 'Quota (Chicago Points)', desc: 'Points scored against target quota (Quota = 36 - Handicap).' }
+      { id: 'stableford', name: 'Stableford', desc: 'Points awarded per hole: Dbl Bogey=0, Bogey=1, Par=2, Birdie=3, Eagle=4, Albatross=5.' },
+      { id: 'nassau', name: 'Nassau (2-2-2)', desc: 'Three separate matches in one: Front 9 winner, Back 9 winner, and Total 18 winner.' },
+      { id: 'shamble', name: 'Shamble', desc: 'Best tee shot selected, then all golfers play their own ball into the cup from there.' },
+      { id: 'match_play', name: 'Match Play (Team / Pairs)', desc: 'Hole-by-hole competition. Winning a hole earns 1 point. Up/Down/Halved tracker.' },
+      { id: 'quota', name: 'Quota (Chicago Points)', desc: 'Points based on score to par against individual target quota (Quota = 36 - Handicap).' }
     ];
+
+    const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
 
     function App() {
       const [accessMode, setAccessMode] = useState('rw');
-      const [activeTab, setActiveTab] = useState('live');
+      const [activeTab, setActiveTab] = useState('live'); // 'live' | 'games' | 'setup' | 'roster' | 'sync'
       const [toastMessage, setToastMessage] = useState('');
 
       const [courseName, setCourseName] = useState('Pinehurst No. 2');
@@ -131,6 +148,7 @@
       const [showOtherModal, setShowOtherModal] = useState(false);
       const [manualScoreInput, setManualScoreInput] = useState('');
 
+      // State restoration (URL hash first, then local storage)
       useEffect(() => {
         const hash = window.location.hash;
         if (hash) {
@@ -154,7 +172,7 @@
           } catch (e) {}
         }
 
-        const saved = localStorage.getItem('GOLF_TRIP_STATE_V5');
+        const saved = localStorage.getItem('GOLF_TRIP_STATE_V6');
         if (saved) {
           try {
             const p = JSON.parse(saved);
@@ -175,13 +193,30 @@
       useEffect(() => {
         if (accessMode === 'rw') {
           const stateToSave = { courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, sheetsWebhookUrl };
-          localStorage.setItem('GOLF_TRIP_STATE_V5', JSON.stringify(stateToSave));
+          localStorage.setItem('GOLF_TRIP_STATE_V6', JSON.stringify(stateToSave));
         }
       }, [accessMode, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, sheetsWebhookUrl]);
 
       const showToast = (msg) => {
         setToastMessage(msg);
         setTimeout(() => setToastMessage(''), 3000);
+      };
+
+      const loadPresetCourse = (presetKey) => {
+        if (accessMode === 'ro') return;
+        const preset = PRESET_COURSES[presetKey];
+        if (preset) {
+          setCourseName(preset.name);
+          setHoles(preset.holes);
+          setHolesCount(preset.holes.length);
+          const newScores = {};
+          preset.holes.forEach(h => {
+            newScores[h.num] = {};
+            players.forEach(p => { newScores[h.num][p.id] = null; });
+          });
+          setScores(newScores);
+          showToast(`Loaded ${preset.name}!`);
+        }
       };
 
       const getPlayerHoleStrokes = (playerHcp, holeHcpIndex) => {
@@ -219,6 +254,37 @@
         }
       };
 
+      const handleAddPlayer = () => {
+        if (accessMode === 'ro') return;
+        const newId = `p${Date.now()}`;
+        const color = COLOR_PALETTE[players.length % COLOR_PALETTE.length];
+        setPlayers(prev => [
+          ...prev,
+          { id: newId, name: `Player ${prev.length + 1}`, hcp: 10, team: prev.length % 2 === 0 ? 'A' : 'B', color }
+        ]);
+        showToast('New golfer added!');
+      };
+
+      const handleDeletePlayer = (id) => {
+        if (accessMode === 'ro') return;
+        if (players.length <= 1) {
+          showToast('Must keep at least 1 player');
+          return;
+        }
+        setPlayers(prev => prev.filter(p => p.id !== id));
+      };
+
+      const handleUpdatePlayer = (id, field, value) => {
+        if (accessMode === 'ro') return;
+        setPlayers(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
+      };
+
+      const handleUpdateHole = (holeNum, field, val) => {
+        if (accessMode === 'ro') return;
+        setHoles(prev => prev.map(h => h.num === holeNum ? { ...h, [field]: Number(val) || val } : h));
+      };
+
+      // Player statistics calculations
       const playerStats = useMemo(() => {
         return players.map(player => {
           let totalGross = 0, totalNet = 0, totalPar = 0, holesPlayed = 0, stablefordPoints = 0;
@@ -242,6 +308,9 @@
 
           const scoreToPar = totalGross - totalPar;
           const netToPar = totalNet - totalPar;
+          const quotaTarget = Math.max(1, 36 - player.hcp);
+          const quotaDiff = stablefordPoints - (holesPlayed / holesCount * quotaTarget);
+
           return {
             ...player,
             holesPlayed,
@@ -250,27 +319,87 @@
             scoreToPar: holesPlayed > 0 ? (scoreToPar > 0 ? `+${scoreToPar}` : scoreToPar === 0 ? 'E' : `${scoreToPar}`) : '-',
             netToPar: holesPlayed > 0 ? (netToPar > 0 ? `+${netToPar}` : netToPar === 0 ? 'E' : `${netToPar}`) : '-',
             rawNetToPar: netToPar,
-            stablefordPoints
+            stablefordPoints,
+            quotaDiff: quotaDiff.toFixed(1)
           };
         });
       }, [players, holes, holesCount, scores]);
 
+      // Team statistics calculations
       const teamStats = useMemo(() => {
         return teams.map(team => {
           const teamPlayers = playerStats.filter(p => p.team === team.id);
           let teamBestBallNetTotal = 0;
+          let holesCompleted = 0;
           holes.slice(0, holesCount).forEach(h => {
             const teamNetScores = teamPlayers.map(p => {
               const raw = scores[h.num]?.[p.id];
               if (!raw) return null;
               return raw - getPlayerHoleStrokes(p.hcp, h.hcp);
             }).filter(s => s !== null);
-            if (teamNetScores.length > 0) teamBestBallNetTotal += Math.min(...teamNetScores);
+            if (teamNetScores.length > 0) {
+              holesCompleted++;
+              teamBestBallNetTotal += Math.min(...teamNetScores);
+            }
           });
-          return { ...team, bestBallNet: teamBestBallNetTotal };
+          return { ...team, bestBallNet: teamBestBallNetTotal, holesCompleted, count: teamPlayers.length };
         });
       }, [teams, playerStats, holes, holesCount, scores]);
 
+      // Tournament games calculations
+      const gameCalculations = useMemo(() => {
+        const skinsData = [];
+        let carryover = 0;
+        holes.slice(0, holesCount).forEach(h => {
+          const holeScores = players.map(p => {
+            const raw = scores[h.num]?.[p.id];
+            if (!raw) return null;
+            return { player: p, net: raw - getPlayerHoleStrokes(p.hcp, h.hcp) };
+          }).filter(Boolean);
+
+          let winner = null;
+          let skinValue = 1 + carryover;
+          if (holeScores.length === players.length && players.length > 0) {
+            const minNet = Math.min(...holeScores.map(s => s.net));
+            const playersWithMin = holeScores.filter(s => s.net === minNet);
+            if (playersWithMin.length === 1) {
+              winner = playersWithMin[0].player;
+              carryover = 0;
+            } else {
+              carryover += 1;
+            }
+          }
+          skinsData.push({ hole: h.num, par: h.par, skinValue, winner, carryover: winner ? 0 : carryover });
+        });
+
+        const vegasHoles = [];
+        let teamAPoints = 0, teamBPoints = 0;
+        holes.slice(0, holesCount).forEach(h => {
+          const tA = players.filter(p => p.team === 'A');
+          const tB = players.filter(p => p.team === 'B');
+          const sA1 = scores[h.num]?.[tA[0]?.id];
+          const sA2 = scores[h.num]?.[tA[1]?.id];
+          const sB1 = scores[h.num]?.[tB[0]?.id];
+          const sB2 = scores[h.num]?.[tB[1]?.id];
+
+          if (sA1 && sA2 && sB1 && sB2) {
+            let aLow = Math.min(sA1, sA2), aHigh = Math.max(sA1, sA2);
+            let bLow = Math.min(sB1, sB2), bHigh = Math.max(sB1, sB2);
+            let valA = parseInt(`${aLow}${aHigh}`, 10);
+            let valB = parseInt(`${bLow}${bHigh}`, 10);
+            if (aLow < h.par && bLow >= h.par) valB = parseInt(`${bHigh}${bLow}`, 10);
+            else if (bLow < h.par && aLow >= h.par) valA = parseInt(`${aHigh}${aLow}`, 10);
+            const diff = valB - valA;
+            if (diff > 0) teamAPoints += diff;
+            else if (diff < 0) teamBPoints += Math.abs(diff);
+            vegasHoles.push({ hole: h.num, valA, valB, diff });
+          }
+        });
+
+        return { skinsData, vegas: { teamAPoints, teamBPoints, vegasHoles } };
+      }, [holes, holesCount, players, scores]);
+
+      // Visual Scorecard Glyphs
       const getScoreBadge = (gross, par) => {
         if (!gross) return <span className="text-gray-500 font-mono text-xs">-</span>;
         const diff = Number(gross) - par;
@@ -281,6 +410,58 @@
         return <span className="inline-flex items-center justify-center w-6 h-6 bg-red-200 text-red-950 border-2 border-red-600 ring-1 ring-red-400 font-black text-xs">{gross}</span>;
       };
 
+      // Push to Google Sheets Webhook
+      const handlePushToSheets = async () => {
+        if (!sheetsWebhookUrl) {
+          showToast('Enter your Google Apps Script URL first');
+          return;
+        }
+        setIsSyncing(true);
+        try {
+          const payload = {
+            timestamp: new Date().toISOString(),
+            courseName,
+            roundDate,
+            players,
+            scores,
+            holes: holes.slice(0, holesCount)
+          };
+          await fetch(sheetsWebhookUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          showToast('Scores sent to Google Sheet!');
+        } catch (e) {
+          showToast('Network error syncing to Google Sheets');
+        } finally {
+          setIsSyncing(false);
+        }
+      };
+
+      // CSV Download
+      const handleExportCSV = () => {
+        let csv = `Course: ${courseName}, Date: ${roundDate}, Holes: ${holesCount}\n\n`;
+        csv += `Hole,${holes.slice(0, holesCount).map(h => h.num).join(',')},Total Gross,Total Net,To Par\n`;
+        csv += `Par,${holes.slice(0, holesCount).map(h => h.par).join(',')},${holes.slice(0, holesCount).reduce((a,b)=>a+b.par,0)},,\n`;
+        csv += `HCP,${holes.slice(0, holesCount).map(h => h.hcp).join(',')},,,\n`;
+
+        playerStats.forEach(p => {
+          const rowScores = holes.slice(0, holesCount).map(h => scores[h.num]?.[p.id] || '').join(',');
+          csv += `${p.name} (HCP ${p.hcp} | Team ${p.team}),${rowScores},${p.totalGross},${p.totalNet},${p.scoreToPar}\n`;
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `GolfTrip_${courseName.replace(/\s+/g, '_')}_${roundDate}.csv`;
+        a.click();
+        showToast('Scorecard CSV downloaded!');
+      };
+
+      // Share Link Generation
       const handleGenerateShareLink = (targetMode) => {
         const compactState = { c: courseName, d: roundDate, h: holesCount, hl: holes, p: players, t: teams, g: activeGame, w: pointsWager, s: scores };
         const encoded = encodeURIComponent(JSON.stringify(compactState));
@@ -316,18 +497,18 @@
       return (
         <div className="flex flex-col h-screen w-full bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
           
-          {/* Header */}
-          <header className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-slate-800 shrink-0">
+          {/* Top Bar */}
+          <header className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-slate-800 shrink-0 z-20">
             <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center font-black text-white">⛳</div>
+              <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center font-black text-white shadow-md">⛳</div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <h1 className="text-sm font-black text-white truncate max-w-[140px]">{courseName}</h1>
+                  <h1 className="text-sm font-black text-white truncate max-w-[140px] sm:max-w-[200px]">{courseName}</h1>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${accessMode === 'ro' ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
                     {accessMode === 'ro' ? 'Viewer' : 'Scorer'}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400">{GAME_TYPES.find(g => g.id === activeGame)?.name}</p>
+                <p className="text-[11px] text-slate-400">{GAME_TYPES.find(g => g.id === activeGame)?.name} • ${pointsWager}/pt</p>
               </div>
             </div>
 
@@ -341,6 +522,9 @@
                   Unlock
                 </button>
               )}
+              <button onClick={handleExportCSV} className="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
+                📥
+              </button>
             </div>
           </header>
 
@@ -357,7 +541,7 @@
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-black text-white">Score (+4 or Higher)</h3>
-                    <p className="text-xs text-slate-400">{activePlayer?.name} • Hole {currentHole}</p>
+                    <p className="text-xs text-slate-400">{activePlayer?.name} • Hole {currentHole} (Par {currentHoleData.par})</p>
                   </div>
                   <button onClick={() => setShowOtherModal(false)} className="text-slate-400 font-bold">✕</button>
                 </div>
@@ -376,48 +560,72 @@
             </div>
           )}
 
-          {/* Main Scoring View */}
-          <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Main App Content View */}
+          <main className="flex-1 flex flex-col overflow-hidden relative">
+
+            {/* TAB 1: LIVE SCORING VIEW */}
             {activeTab === 'live' && (
               <div className="flex-1 flex flex-col h-full overflow-hidden">
-                {/* Top Half: Visual Scorecard */}
+                {/* Visual Scorecard Top Half */}
                 <div className="h-[44%] min-h-[190px] flex flex-col bg-slate-900/60 border-b border-slate-800 overflow-hidden">
                   <div className="px-2.5 py-1.5 bg-slate-900 border-b border-slate-800 flex items-center gap-2 overflow-x-auto shrink-0">
                     {teamStats.map(team => (
-                      <div key={team.id} className="flex items-center gap-2 px-3 py-1 rounded-lg border border-slate-700 text-xs font-bold shrink-0">
+                      <div key={team.id} className={`flex items-center gap-2 px-3 py-1 rounded-lg border text-xs font-bold shrink-0 ${team.id === 'A' ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300' : 'bg-amber-950/40 border-amber-500/40 text-amber-300'}`}>
                         <span>{team.name}:</span>
-                        <span className="font-mono text-emerald-400">{team.bestBallNet} Net</span>
+                        <span className="font-mono text-white text-xs bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700">{team.bestBallNet || 'E'} Net</span>
                       </div>
                     ))}
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800/90 border border-slate-700 text-xs shrink-0 font-medium text-slate-300">
+                      <span>Carryover:</span>
+                      <span className="font-bold text-white font-mono">{gameCalculations.skinsData[gameCalculations.skinsData.length - 1]?.carryover || 0} Skins</span>
+                    </div>
                   </div>
 
                   <div className="flex-1 overflow-auto p-2">
                     <table className="min-w-full text-center border-collapse text-xs">
                       <thead>
-                        <tr className="bg-slate-900 text-slate-300 font-semibold">
+                        <tr className="bg-slate-900 text-slate-300 font-semibold border-b border-slate-800">
                           <th className="sticky left-0 bg-slate-900 px-2 py-1.5 text-left w-24">HOLE</th>
                           {holes.slice(0, holesCount).map(h => (
                             <th key={h.num} onClick={() => setCurrentHole(h.num)} className={`px-2 py-1 font-mono cursor-pointer ${currentHole === h.num ? 'bg-emerald-600 text-white font-bold' : 'text-slate-300'}`}>{h.num}</th>
                           ))}
                           <th className="px-2 py-1 bg-slate-800">TOT</th>
                           <th className="px-2 py-1 bg-slate-800">NET</th>
+                          <th className="px-2 py-1 bg-slate-800">+/-</th>
+                        </tr>
+                        <tr className="bg-slate-900/90 text-[11px] text-slate-400 border-b border-slate-800 font-mono">
+                          <td className="sticky left-0 bg-slate-900 px-2 py-0.5 text-left font-bold">PAR</td>
+                          {holes.slice(0, holesCount).map(h => (
+                            <td key={h.num} className={`py-0.5 ${currentHole === h.num ? 'bg-emerald-950 text-emerald-400 font-bold' : ''}`}>{h.par}</td>
+                          ))}
+                          <td>{holes.slice(0, holesCount).reduce((a,b)=>a+b.par, 0)}</td>
+                          <td>-</td>
+                          <td>-</td>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800">
                         {players.map(player => {
                           const stats = playerStats.find(p => p.id === player.id);
                           return (
-                            <tr key={player.id} onClick={() => setSelectedPlayerId(player.id)} className={`cursor-pointer ${selectedPlayerId === player.id ? 'bg-slate-800/70' : ''}`}>
-                              <td className="sticky left-0 bg-slate-900 px-2 py-2 text-left font-bold truncate text-white">
-                                {player.name}
+                            <tr key={player.id} onClick={() => setSelectedPlayerId(player.id)} className={`cursor-pointer ${selectedPlayerId === player.id ? 'bg-slate-800/70 font-semibold' : ''}`}>
+                              <td className="sticky left-0 bg-slate-900 px-2 py-2 text-left border-r border-slate-800">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: player.color }} />
+                                  <span className="font-bold text-xs text-white truncate">{player.name}</span>
+                                </div>
                               </td>
-                              {holes.slice(0, holesCount).map(h => (
-                                <td key={h.num} onClick={() => { setCurrentHole(h.num); setSelectedPlayerId(player.id); }} className={`p-1 ${currentHole === h.num && selectedPlayerId === player.id ? 'ring-2 ring-emerald-400 bg-emerald-950/40 rounded' : ''}`}>
-                                  {getScoreBadge(scores[h.num]?.[player.id], h.par)}
-                                </td>
-                              ))}
-                              <td className="px-2 py-1 font-mono font-bold">{stats?.totalGross || '-'}</td>
+                              {holes.slice(0, holesCount).map(h => {
+                                const dots = getPlayerHoleStrokes(player.hcp, h.hcp);
+                                return (
+                                  <td key={h.num} onClick={() => { setCurrentHole(h.num); setSelectedPlayerId(player.id); }} className={`p-1 relative ${currentHole === h.num && selectedPlayerId === player.id ? 'ring-2 ring-emerald-400 bg-emerald-950/40 rounded' : ''}`}>
+                                    {getScoreBadge(scores[h.num]?.[player.id], h.par)}
+                                    {dots > 0 && <div className="absolute top-0.5 right-1 text-[8px] leading-none text-emerald-400 font-black">{'•'.repeat(dots)}</div>}
+                                  </td>
+                                );
+                              })}
+                              <td className="px-2 py-1 font-mono font-bold text-white">{stats?.totalGross || '-'}</td>
                               <td className="px-2 py-1 font-mono font-bold text-emerald-400">{stats?.totalNet || '-'}</td>
+                              <td className="px-2 py-1 font-mono font-bold">{stats?.netToPar || '-'}</td>
                             </tr>
                           );
                         })}
@@ -426,27 +634,34 @@
                   </div>
                 </div>
 
-                {/* Bottom Half: Scoring Pad */}
+                {/* Bottom Half Scoring Pad */}
                 {accessMode === 'rw' ? (
                   <div className="flex-1 flex flex-col bg-slate-950 p-3 justify-between gap-2 overflow-hidden">
-                    <div className="flex items-center justify-between bg-slate-900 rounded-2xl p-2.5 border border-slate-800 shrink-0">
-                      <button onClick={() => setCurrentHole(prev => Math.max(1, prev - 1))} disabled={currentHole === 1} className="p-3 rounded-xl bg-slate-800 font-bold disabled:opacity-30">◀</button>
+                    {/* Hole Header */}
+                    <div className="flex items-center justify-between bg-slate-900 rounded-2xl p-2.5 border border-slate-800 shrink-0 shadow">
+                      <button onClick={() => setCurrentHole(prev => Math.max(1, prev - 1))} disabled={currentHole === 1} className="p-3.5 rounded-xl bg-slate-800 font-bold disabled:opacity-30">◀</button>
                       <div className="text-center">
-                        <span className="text-base font-black text-emerald-400">HOLE {currentHole}</span>
-                        <span className="text-xs ml-2 px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">Par {currentHoleData.par}</span>
+                        <span className="text-base font-black uppercase text-emerald-400">HOLE {currentHole}</span>
+                        <span className="text-xs ml-2 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-200 font-mono font-bold">Par {currentHoleData.par}</span>
+                        <span className="text-xs ml-1 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">{currentHoleData.yardage} yds</span>
                       </div>
-                      <button onClick={() => setCurrentHole(prev => Math.min(holesCount, prev + 1))} disabled={currentHole === holesCount} className="p-3 rounded-xl bg-slate-800 font-bold disabled:opacity-30">▶</button>
+                      <button onClick={() => setCurrentHole(prev => Math.min(holesCount, prev + 1))} disabled={currentHole === holesCount} className="p-3.5 rounded-xl bg-slate-800 font-bold disabled:opacity-30">▶</button>
                     </div>
 
+                    {/* Player Chips */}
                     <div className="flex items-center gap-2 overflow-x-auto py-0.5 shrink-0">
                       {players.map(p => (
-                        <button key={p.id} onClick={() => setSelectedPlayerId(p.id)} className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-2xl flex items-center justify-between border ${p.id === selectedPlayerId ? 'bg-slate-800 border-emerald-500 ring-2 ring-emerald-500' : 'bg-slate-900 border-slate-800 opacity-70'}`}>
-                          <span className="text-xs font-black text-white truncate">{p.name}</span>
-                          <span className="text-xs font-mono font-black px-2 py-0.5 rounded bg-emerald-500 text-slate-950">{scores[currentHole]?.[p.id] || '-'}</span>
+                        <button key={p.id} onClick={() => setSelectedPlayerId(p.id)} className={`flex-1 min-w-[130px] py-2.5 px-3 rounded-2xl flex items-center justify-between border ${p.id === selectedPlayerId ? 'bg-slate-800 border-emerald-500 ring-2 ring-emerald-500' : 'bg-slate-900 border-slate-800 opacity-70'}`}>
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                            <span className="text-xs font-black text-white truncate">{p.name}</span>
+                          </div>
+                          <span className="text-xs font-mono font-black px-2 py-0.5 rounded-lg bg-emerald-500 text-slate-950">{scores[currentHole]?.[p.id] || '-'}</span>
                         </button>
                       ))}
                     </div>
 
+                    {/* Quick 6 Scoring Buttons */}
                     <div className="grid grid-cols-3 gap-2.5 flex-1 min-h-[110px]">
                       {quickScoreButtons.map(btn => (
                         <button key={btn.label} onClick={() => { handleSetScore(currentHole, selectedPlayerId, btn.score); advanceToNext(); }} className={`py-3 px-2 rounded-2xl font-bold text-sm flex flex-col items-center justify-center shadow active:scale-95 ${btn.bg}`}>
@@ -456,21 +671,22 @@
                       ))}
                     </div>
 
+                    {/* Bottom Controls */}
                     <div className="grid grid-cols-2 gap-2.5 shrink-0">
-                      <button onClick={() => { setManualScoreInput(''); setShowOtherModal(true); }} className={`py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 border border-red-700 ${isHigherThanTriple ? 'bg-red-700 text-white' : 'bg-red-950 text-red-200'}`}>
+                      <button onClick={() => { setManualScoreInput(''); setShowOtherModal(true); }} className={`py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 border border-red-700 ${isHigherThanTriple ? 'bg-red-700 text-white ring-2 ring-white' : 'bg-red-950 text-red-200'}`}>
                         <span>🟥 +4 / Other</span>
                         <span className="text-xs font-mono">{isHigherThanTriple ? `(${activePlayerHoleScore})` : `(${currentHoleData.par + 4}+)`}</span>
                       </button>
-                      <button onClick={() => handleSetScore(currentHole, selectedPlayerId, null)} className="py-3 rounded-2xl font-bold text-sm bg-slate-800 text-slate-300 border border-slate-700">
+                      <button onClick={() => handleSetScore(currentHole, selectedPlayerId, null)} className="py-3 rounded-2xl font-bold text-sm bg-slate-800 text-slate-300 border border-slate-700 flex items-center justify-center gap-2">
                         Clear Score
                       </button>
                     </div>
                   </div>
                 ) : (
                   <div className="flex-1 flex flex-col bg-slate-950 p-4 justify-center items-center text-center space-y-3">
-                    <div className="p-3 bg-blue-950/40 border border-blue-500/30 rounded-2xl">
-                      <h3 className="text-base font-black text-white">Spectator Live Mode</h3>
-                      <p className="text-xs text-blue-300">Live scorecards update in real time.</p>
+                    <div className="p-4 bg-blue-950/40 border border-blue-500/30 rounded-2xl max-w-xs">
+                      <h3 className="text-base font-black text-white">Live Spectator Mode</h3>
+                      <p className="text-xs text-blue-300 mt-1">Viewing real-time scoring updates.</p>
                     </div>
                     <button onClick={() => setAccessMode('rw')} className="px-6 py-2.5 rounded-xl bg-emerald-600 font-bold text-slate-950 text-xs">Unlock Scoring</button>
                   </div>
@@ -478,24 +694,267 @@
               </div>
             )}
 
-            {activeTab === 'sync' && (
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-950">
-                <h2 className="text-base font-black text-white">Share Live Tournament</h2>
-                <button onClick={() => handleGenerateShareLink('ro')} className="w-full py-3 rounded-xl bg-blue-600 font-bold text-xs text-white">Copy Spectator Link (Read Only)</button>
-                <button onClick={() => handleGenerateShareLink('rw')} className="w-full py-3 rounded-xl bg-emerald-600 font-black text-xs text-slate-950">Copy Scorer Link (Read / Write)</button>
+            {/* TAB 2: TOURNAMENT GAMES & LEADERBOARDS */}
+            {activeTab === 'games' && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-black text-white">Trip Game Engine</h2>
+                  {accessMode === 'rw' ? (
+                    <select value={activeGame} onChange={e => setActiveGame(e.target.value)} className="bg-slate-900 border border-slate-700 text-emerald-400 text-xs font-bold rounded-xl px-3 py-2 outline-none">
+                      {GAME_TYPES.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                  ) : (
+                    <span className="text-xs font-bold text-emerald-400">{GAME_TYPES.find(g=>g.id===activeGame)?.name}</span>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/30">
+                  <span className="text-xs font-black uppercase text-emerald-400 block mb-1">{GAME_TYPES.find(g=>g.id===activeGame)?.name}</span>
+                  <p className="text-xs text-slate-300">{GAME_TYPES.find(g=>g.id===activeGame)?.desc}</p>
+                </div>
+
+                {/* Best Ball Standings */}
+                {activeGame === 'best_ball' && (
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Team Best Ball Leaderboard</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      {teamStats.map(team => (
+                        <div key={team.id} className="p-3 bg-slate-900 rounded-2xl border border-slate-800 text-center">
+                          <span className="text-xs text-slate-400 font-bold block">{team.name}</span>
+                          <span className="text-2xl font-mono font-black text-emerald-400">{team.bestBallNet} Net</span>
+                          <span className="text-[10px] text-slate-500 block">{team.holesCompleted} holes counted</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Skins Standings */}
+                {activeGame === 'skins' && (
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Skins Breakdown</h3>
+                    <div className="bg-slate-900 rounded-2xl border border-slate-800 divide-y divide-slate-800">
+                      {gameCalculations.skinsData.map(s => (
+                        <div key={s.hole} className="p-2.5 flex items-center justify-between text-xs">
+                          <span className="font-mono font-bold text-white">Hole {s.hole} (Par {s.par})</span>
+                          <span className={s.winner ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                            {s.winner ? `🏆 ${s.winner.name} (${s.skinValue} skins)` : `Tie (${s.carryover} carryover)`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Individual Leaderboard */}
+                <div className="space-y-2 pt-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Individual Standings</h3>
+                  <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-800 text-slate-400 font-bold border-b border-slate-700">
+                        <tr>
+                          <th className="p-2.5">Player</th>
+                          <th className="p-2.5 text-center">Gross</th>
+                          <th className="p-2.5 text-center">Net</th>
+                          <th className="p-2.5 text-center">Stableford</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {[...playerStats].sort((a,b) => a.rawNetToPar - b.rawNetToPar).map(p => (
+                          <tr key={p.id}>
+                            <td className="p-2.5 font-bold text-white flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                              {p.name}
+                            </td>
+                            <td className="p-2.5 text-center font-mono">{p.totalGross} ({p.scoreToPar})</td>
+                            <td className="p-2.5 text-center font-mono font-bold text-emerald-400">{p.totalNet} ({p.netToPar})</td>
+                            <td className="p-2.5 text-center font-mono font-bold text-amber-400">{p.stablefordPoints} pts</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             )}
+
+            {/* TAB 3: COURSE SETUP */}
+            {activeTab === 'setup' && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-black text-white">Scorecard & Course Setup</h2>
+                  {accessMode === 'ro' && <span className="text-xs text-amber-400 font-bold">Read Only</span>}
+                </div>
+
+                {accessMode === 'rw' && (
+                  <div className="p-3.5 bg-slate-900 rounded-2xl border border-slate-800 space-y-2">
+                    <span className="text-xs font-bold text-slate-300 block">Quick Load Preset Course</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button onClick={() => loadPresetCourse('pinehurst')} className="p-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700">Pinehurst #2</button>
+                      <button onClick={() => loadPresetCourse('pebble')} className="p-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700">Pebble Beach</button>
+                      <button onClick={() => loadPresetCourse('executive9')} className="p-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700">9-Hole Exec</button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 block mb-1">Course Name</label>
+                    <input type="text" disabled={accessMode === 'ro'} value={courseName} onChange={e => setCourseName(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white font-semibold outline-none focus:border-emerald-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 block mb-1">Date</label>
+                    <input type="date" disabled={accessMode === 'ro'} value={roundDate} onChange={e => setRoundDate(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white font-semibold outline-none focus:border-emerald-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 block mb-1">Holes Count</label>
+                    <div className="flex gap-2">
+                      <button disabled={accessMode === 'ro'} onClick={() => setHolesCount(9)} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${holesCount === 9 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>9 Holes</button>
+                      <button disabled={accessMode === 'ro'} onClick={() => setHolesCount(18)} className={`flex-1 py-2 rounded-xl text-xs font-bold border ${holesCount === 18 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>18 Holes</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-slate-400 block uppercase">Hole Pars & HCP Ratings</span>
+                  <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+                    <table className="w-full text-center text-xs">
+                      <thead className="bg-slate-800 text-slate-400 font-bold">
+                        <tr>
+                          <th className="p-2">Hole</th>
+                          <th className="p-2">Par</th>
+                          <th className="p-2">HCP Index</th>
+                          <th className="p-2">Yardage</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {holes.slice(0, holesCount).map(h => (
+                          <tr key={h.num}>
+                            <td className="p-2 font-mono font-bold text-white">#{h.num}</td>
+                            <td className="p-2">
+                              <select disabled={accessMode === 'ro'} value={h.par} onChange={e => handleUpdateHole(h.num, 'par', e.target.value)} className="bg-slate-800 text-white font-bold rounded px-2 py-1 outline-none">
+                                <option value={3}>Par 3</option>
+                                <option value={4}>Par 4</option>
+                                <option value={5}>Par 5</option>
+                              </select>
+                            </td>
+                            <td className="p-2">
+                              <input type="number" disabled={accessMode === 'ro'} min="1" max="18" value={h.hcp} onChange={e => handleUpdateHole(h.num, 'hcp', e.target.value)} className="w-14 text-center bg-slate-800 rounded px-1 py-1 font-mono text-white" />
+                            </td>
+                            <td className="p-2">
+                              <input type="number" disabled={accessMode === 'ro'} value={h.yardage} onChange={e => handleUpdateHole(h.num, 'yardage', e.target.value)} className="w-16 text-center bg-slate-800 rounded px-1 py-1 font-mono text-white" />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: PLAYERS & TEAMS */}
+            {activeTab === 'roster' && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-black text-white">Trip Players & Teams</h2>
+                  {accessMode === 'rw' && (
+                    <button onClick={handleAddPlayer} className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-xs shadow">+ Add Golfer</button>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {players.map((player, idx) => (
+                    <div key={player.id} className="p-3 bg-slate-900 rounded-2xl border border-slate-800 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <input type="color" disabled={accessMode === 'ro'} value={player.color} onChange={e => handleUpdatePlayer(player.id, 'color', e.target.value)} className="w-7 h-7 rounded-full cursor-pointer bg-transparent border-none" />
+                        <input type="text" disabled={accessMode === 'ro'} value={player.name} onChange={e => handleUpdatePlayer(player.id, 'name', e.target.value)} className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-sm font-bold text-white outline-none" />
+                        {accessMode === 'rw' && (
+                          <button onClick={() => handleDeletePlayer(player.id)} className="p-2 text-red-400 hover:text-red-300">🗑️</button>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-slate-400">HCP Index:</span>
+                          <input type="number" disabled={accessMode === 'ro'} value={player.hcp} onChange={e => handleUpdatePlayer(player.id, 'hcp', Number(e.target.value))} className="w-16 bg-slate-800 border border-slate-700 rounded-xl px-2 py-1 text-xs font-mono text-center text-white" />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-slate-400">Team:</span>
+                          <select disabled={accessMode === 'ro'} value={player.team} onChange={e => handleUpdatePlayer(player.id, 'team', e.target.value)} className="bg-slate-800 border border-slate-700 rounded-xl px-2 py-1 text-xs font-bold text-emerald-400 outline-none">
+                            <option value="A">Team A (Eagles)</option>
+                            <option value="B">Team B (Birdies)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-2">
+                  <span className="text-xs font-bold text-slate-400 uppercase">Wager / Point Stake</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-400 font-bold">$</span>
+                    <input type="number" disabled={accessMode === 'ro'} value={pointsWager} onChange={e => setPointsWager(Number(e.target.value))} className="w-24 bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 font-mono text-sm text-white" />
+                    <span className="text-xs text-slate-400">per point or skin</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 5: SYNC & GOOGLE SHEETS */}
+            {activeTab === 'sync' && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950">
+                <h2 className="text-lg font-black text-white">Cloud Sync & Export</h2>
+
+                <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-3">
+                  <span className="text-xs font-bold text-slate-300 block">Live Share Links</span>
+                  <button onClick={() => handleGenerateShareLink('ro')} className="w-full py-2.5 rounded-xl bg-blue-600 font-bold text-xs text-white">Copy Spectator Link (Read Only)</button>
+                  <button onClick={() => handleGenerateShareLink('rw')} className="w-full py-2.5 rounded-xl bg-emerald-600 font-black text-xs text-slate-950">Copy Scorer Link (Read / Write)</button>
+                </div>
+
+                <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-3">
+                  <span className="text-xs font-bold text-white block">Google Sheets Webhook Sync</span>
+                  <input type="text" placeholder="https://script.google.com/macros/s/.../exec" value={sheetsWebhookUrl} onChange={e => setSheetsWebhookUrl(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white outline-none" />
+                  <button onClick={handlePushToSheets} disabled={isSyncing} className="w-full py-2.5 rounded-xl bg-blue-600 font-bold text-xs text-white shadow">
+                    {isSyncing ? 'Syncing...' : 'Push Scores to Google Sheet Now'}
+                  </button>
+                </div>
+
+                <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-2">
+                  <span className="text-xs font-bold text-slate-300 block">Backup & Reset</span>
+                  <div className="flex gap-2">
+                    <button onClick={handleExportCSV} className="flex-1 py-2 rounded-xl bg-slate-800 text-xs font-bold border border-slate-700">Download CSV</button>
+                    {accessMode === 'rw' && (
+                      <button onClick={() => { setScores({}); showToast('Round cleared'); }} className="px-4 py-2 rounded-xl bg-red-950 text-red-300 text-xs font-bold border border-red-800">Clear Scores</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
           </main>
 
-          {/* Navigation */}
-          <nav className="h-14 bg-slate-900 border-t border-slate-800 flex items-center justify-around px-2 shrink-0">
+          {/* Bottom Navigation */}
+          <nav className="h-14 bg-slate-900 border-t border-slate-800 flex items-center justify-around px-2 shrink-0 z-30">
             <button onClick={() => setActiveTab('live')} className={`flex flex-col items-center flex-1 py-1 ${activeTab === 'live' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-sm">⛳</span>
               <span className="text-[10px]">Round</span>
             </button>
+            <button onClick={() => setActiveTab('games')} className={`flex flex-col items-center flex-1 py-1 ${activeTab === 'games' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
+              <span className="text-sm">🏆</span>
+              <span className="text-[10px]">Games</span>
+            </button>
+            <button onClick={() => setActiveTab('setup')} className={`flex flex-col items-center flex-1 py-1 ${activeTab === 'setup' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
+              <span className="text-sm">⚙️</span>
+              <span className="text-[10px]">Course</span>
+            </button>
+            <button onClick={() => setActiveTab('roster')} className={`flex flex-col items-center flex-1 py-1 ${activeTab === 'roster' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
+              <span className="text-sm">👥</span>
+              <span className="text-[10px]">Players</span>
+            </button>
             <button onClick={() => setActiveTab('sync')} className={`flex flex-col items-center flex-1 py-1 ${activeTab === 'sync' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-sm">🔗</span>
-              <span className="text-[10px]">Share</span>
+              <span className="text-[10px]">Sync</span>
             </button>
           </nav>
 

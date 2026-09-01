@@ -40,7 +40,9 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    const STORAGE_KEY = 'GOLF_TRIP_MASTER_PERSIST_V1';
 
     const PRESET_COURSES = {
       pinehurst: {
@@ -108,8 +110,8 @@
     const GAME_TYPES = [
       { id: 'best_ball', name: 'Best Ball (Four-Ball)', short: 'Best Ball', desc: 'Lowest gross/net ball on each hole counts for the team score.' },
       { id: 'scramble', name: 'Scramble', short: 'Scramble', desc: 'All players hit, pick best shot, all play from there until holed.' },
-      { id: 'vegas', name: 'Vegas (High-Low)', short: 'Vegas', desc: 'Teammates combine scores (e.g. 4 & 5 make 45). Birdie flips opponent’s score!' },
-      { id: 'skins', name: 'Skins with Carryovers', short: 'Skins', desc: 'Lowest unique score wins the skin. Ties carry over to the next hole.' },
+      { id: 'vegas', name: 'Vegas (High-Low)', short: 'Vegas', desc: 'Teammates combine scores (e.g. 4 & 5 make 45). Birdie flips opponent score!' },
+      { id: 'skins', name: 'Skins with Carryovers', short: 'Skins', desc: 'Lowest unique score wins the skin. Ties carry over to next hole.' },
       { id: 'wolf', name: 'Wolf (Rotating Captain)', short: 'Wolf', desc: 'Player has honor, watches drives, selects partner or goes Lone Wolf.' },
       { id: 'stableford', name: 'Stableford Points', short: 'Stableford', desc: 'Points per hole: Dbl Bogey=0, Bogey=1, Par=2, Birdie=3, Eagle=4, Albatross=5.' },
       { id: 'nassau', name: 'Nassau (2-2-2)', short: 'Nassau', desc: 'Three separate matches in one: Front 9 winner, Back 9 winner, and Overall 18.' },
@@ -120,51 +122,78 @@
 
     const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
 
+    // Helper: Safely load initial persisted state BEFORE React renders
+    function getStoredState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) {
+        console.error("Failed to parse localStorage", e);
+      }
+      return null;
+    }
+
+    const savedData = getStoredState();
+
     function App() {
-      const [accessMode, setAccessMode] = useState('rw');
+      const isInitialMount = useRef(true);
+
+      // Access mode (Scorer vs Viewer)
+      const [accessMode, setAccessMode] = useState(() => {
+        try {
+          const hash = window.location.hash;
+          if (hash.includes('mode=readonly') || hash.includes('mode=ro')) return 'ro';
+        } catch (e) {}
+        return 'rw';
+      });
+
       const [activeTab, setActiveTab] = useState('live');
       const [toastMessage, setToastMessage] = useState('');
 
-      const [courseName, setCourseName] = useState('Pinehurst No. 2');
-      const [roundDate, setRoundDate] = useState(new Date().toISOString().split('T')[0]);
-      const [holesCount, setHolesCount] = useState(18);
-      const [holes, setHoles] = useState(PRESET_COURSES.pinehurst.holes);
+      // Persistent Course & Game State
+      const [courseName, setCourseName] = useState(() => savedData?.courseName || 'Pinehurst No. 2');
+      const [roundDate, setRoundDate] = useState(() => savedData?.roundDate || new Date().toISOString().split('T')[0]);
+      const [holesCount, setHolesCount] = useState(() => savedData?.holesCount || 18);
+      const [holes, setHoles] = useState(() => savedData?.holes || PRESET_COURSES.pinehurst.holes);
       
-      const [players, setPlayers] = useState([
+      const [players, setPlayers] = useState(() => savedData?.players || [
         { id: 'p1', name: 'Alex M.', hcp: 8, team: 'A', color: '#10B981' },
         { id: 'p2', name: 'Jake T.', hcp: 14, team: 'A', color: '#3B82F6' },
         { id: 'p3', name: 'Ryan C.', hcp: 10, team: 'B', color: '#F59E0B' },
         { id: 'p4', name: 'Dave K.', hcp: 18, team: 'B', color: '#EC4899' },
       ]);
 
-      const [teams, setTeams] = useState([
+      const [teams, setTeams] = useState(() => savedData?.teams || [
         { id: 'A', name: 'Team Eagles' },
         { id: 'B', name: 'Team Birdies' }
       ]);
 
-      const [activeGame, setActiveGame] = useState('best_ball');
-      const [pointsWager, setPointsWager] = useState(10);
+      const [activeGame, setActiveGame] = useState(() => savedData?.activeGame || 'best_ball');
+      const [pointsWager, setPointsWager] = useState(() => savedData?.pointsWager || 10);
 
+      // Scoring Matrix (1..18 holes)
       const [scores, setScores] = useState(() => {
+        if (savedData?.scores && Object.keys(savedData.scores).length > 0) {
+          return savedData.scores;
+        }
         const initial = {};
         for (let i = 1; i <= 18; i++) initial[i] = { p1: null, p2: null, p3: null, p4: null };
         return initial;
       });
 
-      const [currentHole, setCurrentHole] = useState(1);
+      const [currentHole, setCurrentHole] = useState(() => savedData?.currentHole || 1);
       const [selectedPlayerId, setSelectedPlayerId] = useState('p1');
-      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState('');
+      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState(() => savedData?.sheetsWebhookUrl || '');
       const [isSyncing, setIsSyncing] = useState(false);
       const [showOtherModal, setShowOtherModal] = useState(false);
       const [manualScoreInput, setManualScoreInput] = useState('');
 
-      // State restoration
+      // Process URL State Payloads if opened via Share link (Only on explicit share import)
       useEffect(() => {
         const hash = window.location.hash;
-        if (hash) {
+        if (hash && hash.includes('state=')) {
           try {
             const params = new URLSearchParams(hash.replace(/^#/, ''));
-            if (params.get('mode') === 'readonly' || params.get('mode') === 'ro') setAccessMode('ro');
             const stateParam = params.get('state');
             if (stateParam) {
               const parsed = JSON.parse(decodeURIComponent(stateParam));
@@ -177,35 +206,44 @@
               if (parsed.g) setActiveGame(parsed.g);
               if (parsed.w) setPointsWager(parsed.w);
               if (parsed.s) setScores(parsed.s);
-              return;
+              showToast('Imported tournament from link!');
             }
-          } catch (e) {}
-        }
-
-        const saved = localStorage.getItem('GOLF_TRIP_STATE_V8');
-        if (saved) {
-          try {
-            const p = JSON.parse(saved);
-            if (p.courseName) setCourseName(p.courseName);
-            if (p.roundDate) setRoundDate(p.roundDate);
-            if (p.holesCount) setHolesCount(p.holesCount);
-            if (p.holes) setHoles(p.holes);
-            if (p.players) setPlayers(p.players);
-            if (p.teams) setTeams(p.teams);
-            if (p.activeGame) setActiveGame(p.activeGame);
-            if (p.pointsWager) setPointsWager(p.pointsWager);
-            if (p.scores) setScores(p.scores);
-            if (p.sheetsWebhookUrl) setSheetsWebhookUrl(p.sheetsWebhookUrl);
-          } catch (e) {}
+          } catch (e) {
+            console.error("URL state load failed", e);
+          }
         }
       }, []);
 
+      // BULLETPROOF PERSISTENCE: Save state on every change, guarded against empty mounts
       useEffect(() => {
-        if (accessMode === 'rw') {
-          const stateToSave = { courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, sheetsWebhookUrl };
-          localStorage.setItem('GOLF_TRIP_STATE_V8', JSON.stringify(stateToSave));
+        if (isInitialMount.current) {
+          isInitialMount.current = false;
+          return;
         }
-      }, [accessMode, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, sheetsWebhookUrl]);
+
+        // Only persist if in Scorer mode (protects against spectators overwriting master data)
+        if (accessMode === 'rw') {
+          try {
+            const payload = {
+              courseName,
+              roundDate,
+              holesCount,
+              holes,
+              players,
+              teams,
+              activeGame,
+              pointsWager,
+              scores,
+              currentHole,
+              sheetsWebhookUrl,
+              lastSaved: new Date().toISOString()
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+          } catch (err) {
+            console.error("Local storage save error:", err);
+          }
+        }
+      }, [courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl, accessMode]);
 
       const showToast = (msg) => {
         setToastMessage(msg);
@@ -294,7 +332,19 @@
         setHoles(prev => prev.map(h => h.num === holeNum ? { ...h, [field]: Number(val) || val } : h));
       };
 
-      // Comprehensive Real-Time Player Metrics (Gross, Net, Stableford, Quotas, Skins)
+      // Manual Reset Trigger
+      const handleManualReset = () => {
+        if (confirm("Are you sure you want to clear all scores and start a new round?")) {
+          const freshScores = {};
+          for (let i = 1; i <= 18; i++) freshScores[i] = {};
+          setScores(freshScores);
+          setCurrentHole(1);
+          localStorage.removeItem(STORAGE_KEY);
+          showToast('Round scores reset successfully!');
+        }
+      };
+
+      // Player Metrics
       const playerStats = useMemo(() => {
         return players.map(player => {
           let totalGross = 0, totalNet = 0, totalPar = 0, holesPlayed = 0, stablefordPoints = 0, skinsWon = 0;
@@ -310,15 +360,14 @@
               totalNet += net;
 
               const netDiff = net - h.par;
-              if (netDiff <= -3) stablefordPoints += 5; // Albatross
-              else if (netDiff === -2) stablefordPoints += 4; // Eagle
-              else if (netDiff === -1) stablefordPoints += 3; // Birdie
-              else if (netDiff === 0) stablefordPoints += 2; // Par
-              else if (netDiff === 1) stablefordPoints += 1; // Bogey
+              if (netDiff <= -3) stablefordPoints += 5;
+              else if (netDiff === -2) stablefordPoints += 4;
+              else if (netDiff === -1) stablefordPoints += 3;
+              else if (netDiff === 0) stablefordPoints += 2;
+              else if (netDiff === 1) stablefordPoints += 1;
             }
           });
 
-          // Calculate skins won
           holes.slice(0, holesCount).forEach(h => {
             const allHoleScores = players.map(p => {
               const raw = scores[h.num]?.[p.id];
@@ -360,9 +409,8 @@
         });
       }, [players, holes, holesCount, scores]);
 
-      // Comprehensive Real-Time Team & Multi-Game Engine Calculations
+      // Game Engine
       const gameEngine = useMemo(() => {
-        // 1. Team Best Ball & Scramble
         const teamA = playerStats.filter(p => p.team === 'A');
         const teamB = playerStats.filter(p => p.team === 'B');
 
@@ -379,8 +427,7 @@
           if (sBGross.length > 0) teamBGross += Math.min(...sBGross);
         });
 
-        // 2. Vegas High-Low Points Calculation
-        let vegasTeamA = 0, vegasTeamB = 0, vegasHolesCount = 0;
+        let vegasTeamA = 0, vegasTeamB = 0;
         holes.slice(0, holesCount).forEach(h => {
           const sA1 = scores[h.num]?.[teamA[0]?.id];
           const sA2 = scores[h.num]?.[teamA[1]?.id];
@@ -388,13 +435,11 @@
           const sB2 = scores[h.num]?.[teamB[1]?.id];
 
           if (sA1 && sA2 && sB1 && sB2) {
-            vegasHolesCount++;
             let aLow = Math.min(sA1, sA2), aHigh = Math.max(sA1, sA2);
             let bLow = Math.min(sB1, sB2), bHigh = Math.max(sB1, sB2);
             let valA = parseInt(`${aLow}${aHigh}`, 10);
             let valB = parseInt(`${bLow}${bHigh}`, 10);
 
-            // Birdie Flip
             if (aLow < h.par && bLow >= h.par) valB = parseInt(`${bHigh}${bLow}`, 10);
             else if (bLow < h.par && aLow >= h.par) valA = parseInt(`${aHigh}${aLow}`, 10);
 
@@ -404,7 +449,6 @@
           }
         });
 
-        // 3. Skins & Carryover Status
         const skinsData = [];
         let carryover = 0;
         holes.slice(0, holesCount).forEach(h => {
@@ -428,7 +472,6 @@
           skinsData.push({ hole: h.num, par: h.par, skinValue, winner, carryover: winner ? 0 : carryover });
         });
 
-        // 4. Nassau 2-2-2 Status
         let front9A = 0, front9B = 0, back9A = 0, back9B = 0, total18A = 0, total18B = 0;
         holes.slice(0, holesCount).forEach(h => {
           const sANet = teamA.map(p => scores[h.num]?.[p.id] ? scores[h.num][p.id] - getPlayerHoleStrokes(p.hcp, h.hcp) : 999);
@@ -448,13 +491,12 @@
 
         return {
           bestBall: { teamANet, teamBNet, teamAGross, teamBGross, teamAHoles, teamBHoles },
-          vegas: { vegasTeamA, vegasTeamB, vegasHolesCount, diff: vegasTeamA - vegasTeamB },
+          vegas: { vegasTeamA, vegasTeamB, diff: vegasTeamA - vegasTeamB },
           skins: { skinsData, currentCarryover: skinsData[skinsData.length - 1]?.carryover || 0 },
           nassau: { front9A, front9B, back9A, back9B, total18A, total18B }
         };
       }, [players, playerStats, holes, holesCount, scores]);
 
-      // Visual Scorecard Glyphs
       const getScoreBadge = (gross, par) => {
         if (!gross) return <span className="text-gray-500 font-mono text-[11px]">-</span>;
         const diff = Number(gross) - par;
@@ -547,7 +589,6 @@
       const activePlayerStrokes = activePlayer ? getPlayerHoleStrokes(activePlayer.hcp, currentHoleData.hcp) : 0;
       const isHigherThanTriple = activePlayerHoleScore && activePlayerHoleScore > currentHoleData.par + 3;
 
-      // Dynamic Main Scorecard Columns Configuration based on Active Game
       const scorecardColumns = useMemo(() => {
         switch (activeGame) {
           case 'stableford':
@@ -571,7 +612,7 @@
               renderCol1: (stats) => stats.totalNet || '-',
               renderCol2: (stats) => <span className="text-purple-300 font-black">🏆 {stats.skinsWon}</span>
             };
-          default: // best_ball, scramble, vegas, nassau, match_play
+          default:
             return {
               col1Header: 'GROSS',
               col2Header: 'NET',
@@ -584,7 +625,7 @@
       return (
         <div className="flex flex-col h-[100dvh] w-full max-w-lg mx-auto bg-slate-950 text-slate-100 overflow-hidden select-none">
           
-          {/* Top Global Bar with Fast Game Switcher */}
+          {/* Top Global Bar */}
           <header className="safe-top flex items-center justify-between px-3 py-1.5 bg-slate-900 border-b border-slate-800 shrink-0 z-20">
             <div className="flex items-center space-x-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-600 flex items-center justify-center font-black text-sm text-white shadow">⛳</div>
@@ -596,7 +637,6 @@
                   </span>
                 </div>
                 
-                {/* Fast Game Switch Dropdown */}
                 {accessMode === 'rw' ? (
                   <select 
                     value={activeGame} 
@@ -668,17 +708,15 @@
           {/* Main App Body */}
           <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
 
-            {/* TAB 1: DYNAMIC MAIN LIVE SCORING VIEW */}
+            {/* TAB 1: LIVE SCORING VIEW */}
             {activeTab === 'live' && (
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 
-                {/* Visual Scorecard Top Half (Flexible height) */}
+                {/* Visual Scorecard Top Half */}
                 <div className="flex-1 min-h-[140px] max-h-[48%] flex flex-col bg-slate-900/40 border-b border-slate-800/80 overflow-hidden">
                   
-                  {/* DYNAMIC LIVE METRICS BANNER (Updates specifically based on activeGame) */}
+                  {/* Dynamic Standings Banner */}
                   <div className="px-2 py-1 bg-slate-900 border-b border-slate-800/80 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-                    
-                    {/* Mode A: Best Ball / Scramble / Shamble */}
                     {(activeGame === 'best_ball' || activeGame === 'scramble' || activeGame === 'shamble' || activeGame === 'match_play') && (
                       <>
                         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
@@ -698,7 +736,6 @@
                       </>
                     )}
 
-                    {/* Mode B: Vegas */}
                     {activeGame === 'vegas' && (
                       <>
                         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
@@ -710,41 +747,30 @@
                           <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.vegas.vegasTeamB} pts</span>
                         </div>
                         <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-950/40 border border-purple-500/40 text-[11px] shrink-0 text-purple-300">
-                          <span>Margin:</span>
-                          <span className="font-bold text-white font-mono">{Math.abs(gameEngine.vegas.diff)} pts (${(Math.abs(gameEngine.vegas.diff) * 0.5).toFixed(0)})</span>
+                          <span>Diff:</span>
+                          <span className="font-bold text-white font-mono">{Math.abs(gameEngine.vegas.diff)} pts</span>
                         </div>
                       </>
                     )}
 
-                    {/* Mode C: Skins */}
                     {activeGame === 'skins' && (
                       <>
                         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-purple-500/40 bg-purple-950/40 text-purple-300 text-[11px] font-bold shrink-0">
-                          <span>Carryover Pot:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.skins.currentCarryover} Skins (${gameEngine.skins.currentCarryover * pointsWager})</span>
-                        </div>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>Leader:</span>
-                          <span className="font-bold text-emerald-400">{[...playerStats].sort((a,b) => b.skinsWon - a.skinsWon)[0]?.name || 'None'} ({[...playerStats].sort((a,b) => b.skinsWon - a.skinsWon)[0]?.skinsWon} skins)</span>
+                          <span>Carryover:</span>
+                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.skins.currentCarryover} Skins</span>
                         </div>
                       </>
                     )}
 
-                    {/* Mode D: Stableford */}
                     {activeGame === 'stableford' && (
                       <>
                         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
                           <span>Leader:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.name} ({[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.stablefordPoints} pts)</span>
-                        </div>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>Avg Pts:</span>
-                          <span className="font-bold text-white font-mono">{(playerStats.reduce((a,b)=>a+b.stablefordPoints,0) / (players.length || 1)).toFixed(1)}</span>
+                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.name} ({[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.stablefordPoints}p)</span>
                         </div>
                       </>
                     )}
 
-                    {/* Mode E: Quota (Chicago) */}
                     {activeGame === 'quota' && (
                       <>
                         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
@@ -754,27 +780,21 @@
                       </>
                     )}
 
-                    {/* Mode F: Nassau */}
                     {activeGame === 'nassau' && (
                       <>
                         <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>Front 9:</span>
+                          <span>F9:</span>
                           <span className="font-mono font-bold text-emerald-400">{gameEngine.nassau.front9A}-{gameEngine.nassau.front9B}</span>
                         </div>
                         <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>Back 9:</span>
+                          <span>B9:</span>
                           <span className="font-mono font-bold text-emerald-400">{gameEngine.nassau.back9A}-{gameEngine.nassau.back9B}</span>
-                        </div>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>18:</span>
-                          <span className="font-mono font-bold text-white">{gameEngine.nassau.total18A}-{gameEngine.nassau.total18B}</span>
                         </div>
                       </>
                     )}
-
                   </div>
 
-                  {/* Horizontal Scrollable Table with DYNAMIC SUMMARY COLUMNS */}
+                  {/* Physical Visual Scorecard Grid */}
                   <div className="flex-1 overflow-auto p-1.5">
                     <table className="min-w-full text-center border-collapse text-[11px]">
                       <thead>
@@ -816,7 +836,6 @@
                                 );
                               })}
                               
-                              {/* Dynamic Game-Specific Columns */}
                               <td className="px-1.5 py-0.5 font-mono font-bold text-white bg-slate-900/40">
                                 {scorecardColumns.renderCol1(stats)}
                               </td>
@@ -886,7 +905,7 @@
                   <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-2">
                     <div className="p-3 bg-blue-950/40 border border-blue-500/30 rounded-xl max-w-xs">
                       <h3 className="text-xs font-black text-white">Live Spectator Mode</h3>
-                      <p className="text-[11px] text-blue-300">Live scorecards update dynamically with the game.</p>
+                      <p className="text-[11px] text-blue-300">Live scorecards update in real time.</p>
                     </div>
                     <button onClick={() => setAccessMode('rw')} className="px-5 py-2 rounded-xl bg-emerald-600 font-bold text-slate-950 text-xs shadow active:scale-95 transition">Unlock Scoring</button>
                   </div>
@@ -913,7 +932,6 @@
                   <p className="text-[11px] text-slate-300">{GAME_TYPES.find(g=>g.id===activeGame)?.desc}</p>
                 </div>
 
-                {/* Best Ball Standings */}
                 <div className="space-y-2">
                   <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Team Best Ball Leaderboard</h3>
                   <div className="grid grid-cols-2 gap-2">
@@ -930,7 +948,6 @@
                   </div>
                 </div>
 
-                {/* Vegas Standings */}
                 <div className="space-y-2">
                   <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Vegas Standings</h3>
                   <div className="grid grid-cols-2 gap-2">
@@ -945,7 +962,6 @@
                   </div>
                 </div>
 
-                {/* Individual Leaderboard */}
                 <div className="space-y-1.5 pt-1">
                   <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Individual Standings</h3>
                   <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
@@ -1102,7 +1118,7 @@
               </div>
             )}
 
-            {/* TAB 5: SYNC & GOOGLE SHEETS */}
+            {/* TAB 5: SYNC & RESET */}
             {activeTab === 'sync' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <h2 className="text-sm font-black text-white">Cloud Sync & Export</h2>
@@ -1121,12 +1137,13 @@
                   </button>
                 </div>
 
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-1.5">
-                  <span className="text-[11px] font-bold text-slate-300 block">Backup & Reset</span>
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+                  <span className="text-[11px] font-bold text-slate-300 block">Tournament Storage & Reset</span>
+                  <p className="text-[10px] text-slate-400">Data automatically saves across sessions. Tap below only to wipe and start a fresh tournament.</p>
                   <div className="flex gap-2">
                     <button onClick={handleExportCSV} className="flex-1 py-1.5 rounded-lg bg-slate-800 text-xs font-bold border border-slate-700 active:scale-95 transition">Download CSV</button>
                     {accessMode === 'rw' && (
-                      <button onClick={() => { setScores({}); showToast('Round cleared'); }} className="px-3 py-1.5 rounded-lg bg-red-950 text-red-300 text-xs font-bold border border-red-800 active:scale-95 transition">Clear Scores</button>
+                      <button onClick={handleManualReset} className="px-3 py-1.5 rounded-lg bg-red-950 text-red-300 text-xs font-bold border border-red-800 active:scale-95 transition">Reset Round</button>
                     )}
                   </div>
                 </div>

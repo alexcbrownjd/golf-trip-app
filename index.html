@@ -40,11 +40,11 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    const STORAGE_KEY_ROUND = 'GOLF_TRIP_ACTIVE_ROUND_V9';
-    const STORAGE_KEY_COURSES = 'GOLF_TRIP_SAVED_COURSES_V9';
-    const STORAGE_KEY_ROSTER = 'GOLF_TRIP_SAVED_ROSTER_V9';
+    const KEY_ROUND = 'GOLF_TRIP_ACTIVE_ROUND_STABLE';
+    const KEY_COURSES = 'GOLF_TRIP_COURSES_LIB_STABLE';
+    const KEY_ROSTER = 'GOLF_TRIP_ROSTER_LIB_STABLE';
 
     const DEFAULT_COURSES = [
       {
@@ -139,134 +139,167 @@
 
     const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
 
-    function safeLoadJSON(key, fallback) {
+    // Safe synchronous loader
+    function loadStorage(key, fallback) {
       try {
-        const raw = localStorage.getItem(key);
-        if (raw) return JSON.parse(raw);
+        const val = localStorage.getItem(key);
+        if (val) return JSON.parse(val);
       } catch (e) {
-        console.error("Local load failed for " + key, e);
+        console.warn('Storage read error for ' + key, e);
       }
       return fallback;
     }
 
+    // Direct synchronous saver
+    function saveStorage(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (e) {
+        console.warn('Storage write error for ' + key, e);
+      }
+    }
+
     function App() {
-      const isInitialMount = useRef(true);
+      // 1. Check if URL has state payload (for 1-time import)
+      let initialImport = null;
+      let initialMode = 'rw';
+      try {
+        const hash = window.location.hash;
+        if (hash) {
+          if (hash.includes('mode=readonly') || hash.includes('mode=ro')) initialMode = 'ro';
+          if (hash.includes('state=')) {
+            const params = new URLSearchParams(hash.replace(/^#/, ''));
+            const s = params.get('state');
+            if (s) initialImport = JSON.parse(decodeURIComponent(s));
+          }
+        }
+      } catch (e) {}
 
-      // Access Mode (Scorer vs Spectator)
-      const [accessMode, setAccessMode] = useState(() => {
-        try {
-          const hash = window.location.hash;
-          if (hash.includes('mode=readonly') || hash.includes('mode=ro')) return 'ro';
-        } catch (e) {}
-        return 'rw';
-      });
+      // Clean the URL bar immediately so browser refresh won't re-trigger static snapshot
+      useEffect(() => {
+        if (window.location.hash.includes('state=')) {
+          try {
+            history.replaceState(null, '', window.location.pathname + (initialMode === 'ro' ? '#mode=readonly' : ''));
+          } catch (e) {}
+        }
+      }, [initialMode]);
 
+      const [accessMode, setAccessMode] = useState(initialMode);
       const [activeTab, setActiveTab] = useState('live');
       const [toastMessage, setToastMessage] = useState('');
 
-      // PERMANENT LIBRARIES (Courses & Saved Golfers)
-      const [savedCourses, setSavedCourses] = useState(() => safeLoadJSON(STORAGE_KEY_COURSES, DEFAULT_COURSES));
-      const [savedRoster, setSavedRoster] = useState(() => safeLoadJSON(STORAGE_KEY_ROSTER, DEFAULT_SAVED_PLAYERS));
+      // LIBRARIES (Loaded synchronously)
+      const [savedCourses, setSavedCourses] = useState(() => loadStorage(KEY_COURSES, DEFAULT_COURSES));
+      const [savedRoster, setSavedRoster] = useState(() => loadStorage(KEY_ROSTER, DEFAULT_SAVED_PLAYERS));
 
-      // ACTIVE TOURNAMENT ROUND STATE
-      const savedRound = safeLoadJSON(STORAGE_KEY_ROUND, null);
+      // ACTIVE ROUND (Imported link > Local storage > Defaults)
+      const cachedRound = loadStorage(KEY_ROUND, null);
+      const seed = initialImport || cachedRound;
 
-      const [courseName, setCourseName] = useState(() => savedRound?.courseName || 'Pinehurst No. 2');
-      const [roundDate, setRoundDate] = useState(() => savedRound?.roundDate || new Date().toISOString().split('T')[0]);
-      const [holesCount, setHolesCount] = useState(() => savedRound?.holesCount || 18);
-      const [holes, setHoles] = useState(() => savedRound?.holes || DEFAULT_COURSES[0].holes);
+      const [courseName, setCourseName] = useState(() => seed?.c || seed?.courseName || 'Pinehurst No. 2');
+      const [roundDate, setRoundDate] = useState(() => seed?.d || seed?.roundDate || new Date().toISOString().split('T')[0]);
+      const [holesCount, setHolesCount] = useState(() => seed?.h || seed?.holesCount || 18);
+      const [holes, setHoles] = useState(() => seed?.hl || seed?.holes || DEFAULT_COURSES[0].holes);
       
-      const [players, setPlayers] = useState(() => savedRound?.players || [
+      const [players, setPlayers] = useState(() => seed?.p || seed?.players || [
         { id: 'p1', name: 'Alex M.', hcp: 8, team: 'A', color: '#10B981' },
         { id: 'p2', name: 'Jake T.', hcp: 14, team: 'A', color: '#3B82F6' },
         { id: 'p3', name: 'Ryan C.', hcp: 10, team: 'B', color: '#F59E0B' },
         { id: 'p4', name: 'Dave K.', hcp: 18, team: 'B', color: '#EC4899' },
       ]);
 
-      const [teams, setTeams] = useState(() => savedRound?.teams || [
+      const [teams, setTeams] = useState(() => seed?.t || seed?.teams || [
         { id: 'A', name: 'Team Eagles' },
         { id: 'B', name: 'Team Birdies' }
       ]);
 
-      const [activeGame, setActiveGame] = useState(() => savedRound?.activeGame || 'best_ball');
-      const [pointsWager, setPointsWager] = useState(() => savedRound?.pointsWager || 10);
+      const [activeGame, setActiveGame] = useState(() => seed?.g || seed?.activeGame || 'best_ball');
+      const [pointsWager, setPointsWager] = useState(() => seed?.w || seed?.pointsWager || 10);
 
       const [scores, setScores] = useState(() => {
-        if (savedRound?.scores && Object.keys(savedRound.scores).length > 0) return savedRound.scores;
+        const rawScores = seed?.s || seed?.scores;
+        if (rawScores && Object.keys(rawScores).length > 0) return rawScores;
         const initial = {};
         for (let i = 1; i <= 18; i++) initial[i] = { p1: null, p2: null, p3: null, p4: null };
         return initial;
       });
 
-      const [currentHole, setCurrentHole] = useState(() => savedRound?.currentHole || 1);
+      const [currentHole, setCurrentHole] = useState(() => seed?.currentHole || 1);
       const [selectedPlayerId, setSelectedPlayerId] = useState('p1');
-      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState(() => savedRound?.sheetsWebhookUrl || '');
+      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState(() => seed?.sheetsWebhookUrl || '');
       const [isSyncing, setIsSyncing] = useState(false);
       const [showOtherModal, setShowOtherModal] = useState(false);
       const [manualScoreInput, setManualScoreInput] = useState('');
       const [showRosterPickerModal, setShowRosterPickerModal] = useState(false);
 
-      // Save Courses Library permanently whenever it changes
+      // Centralized Synchronous Save Function
+      const persistCurrentState = useCallback(() => {
+        if (accessMode === 'rw') {
+          const snapshot = {
+            courseName,
+            roundDate,
+            holesCount,
+            holes,
+            players,
+            teams,
+            activeGame,
+            pointsWager,
+            scores,
+            currentHole,
+            sheetsWebhookUrl,
+            updatedAt: Date.now()
+          };
+          saveStorage(KEY_ROUND, snapshot);
+        }
+      }, [accessMode, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl]);
+
+      // Save on State Change
       useEffect(() => {
-        try {
-          localStorage.setItem(STORAGE_KEY_COURSES, JSON.stringify(savedCourses));
-        } catch (e) {}
+        persistCurrentState();
+      }, [persistCurrentState]);
+
+      // Mobile Lifecycle Listeners: Save when switching apps or locking phone
+      useEffect(() => {
+        const handleFlush = () => persistCurrentState();
+        window.addEventListener('pagehide', handleFlush);
+        window.addEventListener('beforeunload', handleFlush);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') persistCurrentState();
+        });
+        return () => {
+          window.removeEventListener('pagehide', handleFlush);
+          window.removeEventListener('beforeunload', handleFlush);
+        };
+      }, [persistCurrentState]);
+
+      // Save Courses & Roster updates
+      useEffect(() => {
+        saveStorage(KEY_COURSES, savedCourses);
       }, [savedCourses]);
 
-      // Save Golfer Roster permanently whenever it changes
       useEffect(() => {
-        try {
-          localStorage.setItem(STORAGE_KEY_ROSTER, JSON.stringify(savedRoster));
-        } catch (e) {}
+        saveStorage(KEY_ROSTER, savedRoster);
       }, [savedRoster]);
-
-      // Save Active Round persistently
-      useEffect(() => {
-        if (isInitialMount.current) {
-          isInitialMount.current = false;
-          return;
-        }
-
-        if (accessMode === 'rw') {
-          try {
-            const payload = {
-              courseName,
-              roundDate,
-              holesCount,
-              holes,
-              players,
-              teams,
-              activeGame,
-              pointsWager,
-              scores,
-              currentHole,
-              sheetsWebhookUrl
-            };
-            localStorage.setItem(STORAGE_KEY_ROUND, JSON.stringify(payload));
-          } catch (e) {}
-        }
-      }, [courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl, accessMode]);
 
       const showToast = (msg) => {
         setToastMessage(msg);
-        setTimeout(() => setToastMessage(''), 3000);
+        setTimeout(() => setToastMessage(''), 2500);
       };
 
       // COURSE LIBRARY ACTIONS
       const handleSaveCurrentCourseToLibrary = () => {
         const courseId = `c_${Date.now()}`;
-        const newCourseEntry = {
+        const newEntry = {
           id: courseId,
           name: courseName.trim() || 'Custom Course',
           holesCount: Number(holesCount),
           holes: JSON.parse(JSON.stringify(holes.slice(0, holesCount)))
         };
 
-        setSavedCourses(prev => {
-          const filtered = prev.filter(c => c.name.toLowerCase() !== newCourseEntry.name.toLowerCase());
-          return [newCourseEntry, ...filtered];
-        });
-        showToast(`Saved "${newCourseEntry.name}" to Course Library!`);
+        const updated = [newEntry, ...savedCourses.filter(c => c.name.toLowerCase() !== newEntry.name.toLowerCase())];
+        setSavedCourses(updated);
+        saveStorage(KEY_COURSES, updated);
+        showToast(`Saved "${newEntry.name}" to library!`);
       };
 
       const handleLoadCourseFromLibrary = (courseObj) => {
@@ -275,7 +308,6 @@
         setHolesCount(courseObj.holesCount);
         setHoles(JSON.parse(JSON.stringify(courseObj.holes)));
         
-        // Reset scores matrix safely for new course layout
         const newScores = {};
         for (let i = 1; i <= courseObj.holesCount; i++) {
           newScores[i] = {};
@@ -287,32 +319,34 @@
       };
 
       const handleDeleteCourseFromLibrary = (id, name) => {
-        if (confirm(`Remove "${name}" from your course library?`)) {
-          setSavedCourses(prev => prev.filter(c => c.id !== id));
-          showToast(`Removed "${name}" from library.`);
+        if (confirm(`Delete "${name}" from your course library?`)) {
+          const updated = savedCourses.filter(c => c.id !== id);
+          setSavedCourses(updated);
+          saveStorage(KEY_COURSES, updated);
+          showToast(`Deleted "${name}"`);
         }
       };
 
       // GOLFER ROSTER LIBRARY ACTIONS
       const handleSaveCurrentPlayersToRoster = () => {
-        setSavedRoster(prev => {
-          const rosterMap = new Map(prev.map(p => [p.name.toLowerCase(), p]));
-          players.forEach(p => {
-            rosterMap.set(p.name.toLowerCase(), {
-              id: p.id.startsWith('sp') ? p.id : `sp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-              name: p.name.trim(),
-              hcp: Number(p.hcp) || 0,
-              color: p.color
-            });
+        const rosterMap = new Map(savedRoster.map(p => [p.name.toLowerCase(), p]));
+        players.forEach(p => {
+          rosterMap.set(p.name.toLowerCase(), {
+            id: p.id.startsWith('sp') ? p.id : `sp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            name: p.name.trim(),
+            hcp: Number(p.hcp) || 0,
+            color: p.color
           });
-          return Array.from(rosterMap.values());
         });
-        showToast('Saved all active players to Trip Roster!');
+        const updated = Array.from(rosterMap.values());
+        setSavedRoster(updated);
+        saveStorage(KEY_ROSTER, updated);
+        showToast('Roster saved permanently!');
       };
 
       const handleAddPlayerFromSavedRoster = (savedPlayer) => {
         if (players.some(p => p.name.toLowerCase() === savedPlayer.name.toLowerCase())) {
-          showToast(`${savedPlayer.name} is already in the round!`);
+          showToast(`${savedPlayer.name} already in round`);
           return;
         }
         const newPlayerInstance = {
@@ -323,12 +357,14 @@
           color: savedPlayer.color || COLOR_PALETTE[players.length % COLOR_PALETTE.length]
         };
         setPlayers(prev => [...prev, newPlayerInstance]);
-        showToast(`Added ${savedPlayer.name} to Round!`);
+        showToast(`Added ${savedPlayer.name}`);
       };
 
       const handleDeletePlayerFromRoster = (id, name) => {
-        setSavedRoster(prev => prev.filter(p => p.id !== id));
-        showToast(`Removed ${name} from saved roster.`);
+        const updated = savedRoster.filter(p => p.id !== id);
+        setSavedRoster(updated);
+        saveStorage(KEY_ROSTER, updated);
+        showToast(`Removed ${name}`);
       };
 
       const getPlayerHoleStrokes = (playerHcp, holeHcpIndex) => {
@@ -342,16 +378,25 @@
         return holes.find(h => h.num === currentHole) || { num: currentHole, par: 4, hcp: 1, yardage: 400 };
       }, [holes, currentHole]);
 
+      // Direct Scoring Mutation with Immediate Write
       const handleSetScore = (holeNum, playerId, scoreValue) => {
         if (accessMode === 'ro') {
           showToast('Spectator mode: Scoring locked');
           return;
         }
         const val = scoreValue === null || scoreValue === undefined ? null : Number(scoreValue);
-        setScores(prev => ({
-          ...prev,
-          [holeNum]: { ...(prev[holeNum] || {}), [playerId]: val }
-        }));
+        setScores(prev => {
+          const updated = {
+            ...prev,
+            [holeNum]: { ...(prev[holeNum] || {}), [playerId]: val }
+          };
+          // Direct synchronous write
+          saveStorage(KEY_ROUND, {
+            courseName, roundDate, holesCount, holes, players, teams,
+            activeGame, pointsWager, scores: updated, currentHole, sheetsWebhookUrl
+          });
+          return updated;
+        });
       };
 
       const advanceToNext = () => {
@@ -397,16 +442,20 @@
       };
 
       const handleManualReset = () => {
-        if (confirm("Reset active round scores? (Your saved courses & golfer profiles remain safe)")) {
+        if (confirm("Reset active scores? (Course library and saved golfers will NOT be deleted)")) {
           const freshScores = {};
           for (let i = 1; i <= holesCount; i++) freshScores[i] = {};
           setScores(freshScores);
           setCurrentHole(1);
-          showToast('Round scores reset!');
+          saveStorage(KEY_ROUND, {
+            courseName, roundDate, holesCount, holes, players, teams,
+            activeGame, pointsWager, scores: freshScores, currentHole: 1, sheetsWebhookUrl
+          });
+          showToast('Active round reset!');
         }
       };
 
-      // Player Metrics
+      // Player Calculations
       const playerStats = useMemo(() => {
         return players.map(player => {
           let totalGross = 0, totalNet = 0, totalPar = 0, holesPlayed = 0, stablefordPoints = 0, skinsWon = 0;
@@ -534,28 +583,10 @@
           skinsData.push({ hole: h.num, par: h.par, skinValue, winner, carryover: winner ? 0 : carryover });
         });
 
-        let front9A = 0, front9B = 0, back9A = 0, back9B = 0, total18A = 0, total18B = 0;
-        holes.slice(0, holesCount).forEach(h => {
-          const sANet = teamA.map(p => scores[h.num]?.[p.id] ? scores[h.num][p.id] - getPlayerHoleStrokes(p.hcp, h.hcp) : 999);
-          const sBNet = teamB.map(p => scores[h.num]?.[p.id] ? scores[h.num][p.id] - getPlayerHoleStrokes(p.hcp, h.hcp) : 999);
-          const minA = Math.min(...sANet);
-          const minB = Math.min(...sBNet);
-          if (minA !== 999 && minB !== 999) {
-            if (minA < minB) {
-              if (h.num <= 9) front9A++; else back9A++;
-              total18A++;
-            } else if (minB < minA) {
-              if (h.num <= 9) front9B++; else back9B++;
-              total18B++;
-            }
-          }
-        });
-
         return {
           bestBall: { teamANet, teamBNet, teamAGross, teamBGross, teamAHoles, teamBHoles },
           vegas: { vegasTeamA, vegasTeamB, diff: vegasTeamA - vegasTeamB },
-          skins: { skinsData, currentCarryover: skinsData[skinsData.length - 1]?.carryover || 0 },
-          nassau: { front9A, front9B, back9A, back9B, total18A, total18B }
+          skins: { skinsData, currentCarryover: skinsData[skinsData.length - 1]?.carryover || 0 }
         };
       }, [players, playerStats, holes, holesCount, scores]);
 
@@ -571,7 +602,7 @@
 
       const handlePushToSheets = async () => {
         if (!sheetsWebhookUrl) {
-          showToast('Enter your Google Apps Script URL first');
+          showToast('Enter Google Apps Script URL');
           return;
         }
         setIsSyncing(true);
@@ -591,9 +622,9 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-          showToast('Scores sent to Google Sheet!');
+          showToast('Sent to Google Sheet!');
         } catch (e) {
-          showToast('Network error syncing to Google Sheets');
+          showToast('Network error syncing');
         } finally {
           setIsSyncing(false);
         }
@@ -616,7 +647,7 @@
         a.href = url;
         a.download = `GolfTrip_${courseName.replace(/\s+/g, '_')}_${roundDate}.csv`;
         a.click();
-        showToast('Scorecard CSV downloaded!');
+        showToast('CSV downloaded!');
       };
 
       const handleGenerateShareLink = (targetMode) => {
@@ -631,7 +662,7 @@
         temp.select();
         document.execCommand('copy');
         document.body.removeChild(temp);
-        showToast(targetMode === 'ro' ? 'Spectator (Read-Only) link copied!' : 'Scorer (Read/Write) link copied!');
+        showToast(targetMode === 'ro' ? 'Viewer link copied!' : 'Scorer link copied!');
       };
 
       const quickScoreButtons = useMemo(() => {
@@ -702,10 +733,7 @@
                 {accessMode === 'rw' ? (
                   <select 
                     value={activeGame} 
-                    onChange={(e) => {
-                      setActiveGame(e.target.value);
-                      showToast(`Game set to ${GAME_TYPES.find(g => g.id === e.target.value)?.name}`);
-                    }}
+                    onChange={(e) => setActiveGame(e.target.value)}
                     className="bg-transparent text-[11px] text-emerald-400 font-bold border-none outline-none cursor-pointer p-0 m-0"
                   >
                     {GAME_TYPES.map(g => (
@@ -877,19 +905,6 @@
                         </div>
                       </>
                     )}
-
-                    {activeGame === 'nassau' && (
-                      <>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>F9:</span>
-                          <span className="font-mono font-bold text-emerald-400">{gameEngine.nassau.front9A}-{gameEngine.nassau.front9B}</span>
-                        </div>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>B9:</span>
-                          <span className="font-mono font-bold text-emerald-400">{gameEngine.nassau.back9A}-{gameEngine.nassau.back9B}</span>
-                        </div>
-                      </>
-                    )}
                   </div>
 
                   {/* Physical Scorecard Grid */}
@@ -987,7 +1002,7 @@
                       ))}
                     </div>
 
-                    {/* Bottom Utility Controls (+4/Other & Clear) */}
+                    {/* Bottom Utility Controls */}
                     <div className="grid grid-cols-2 gap-1.5 shrink-0">
                       <button onClick={() => { setManualScoreInput(''); setShowOtherModal(true); }} className={`py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-red-700/80 active:scale-95 transition ${isHigherThanTriple ? 'bg-red-700 text-white ring-1 ring-white' : 'bg-red-950/80 text-red-200 hover:bg-red-900'}`}>
                         <span className="font-black">🟥 +4 / Other</span>
@@ -1011,7 +1026,7 @@
               </div>
             )}
 
-            {/* TAB 2: TOURNAMENT GAMES & LEADERBOARDS */}
+            {/* TAB 2: TOURNAMENT GAMES */}
             {activeTab === 'games' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1045,55 +1060,10 @@
                     </div>
                   </div>
                 </div>
-
-                <div className="space-y-2">
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Vegas Standings</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
-                      <span className="text-[11px] text-slate-400 font-bold block">Team Eagles</span>
-                      <span className="text-xl font-mono font-black text-emerald-400">{gameEngine.vegas.vegasTeamA} pts</span>
-                    </div>
-                    <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
-                      <span className="text-[11px] text-slate-400 font-bold block">Team Birdies</span>
-                      <span className="text-xl font-mono font-black text-amber-400">{gameEngine.vegas.vegasTeamB} pts</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 pt-1">
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Individual Standings</h3>
-                  <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-800 text-slate-400 font-bold">
-                        <tr>
-                          <th className="p-2">Player</th>
-                          <th className="p-2 text-center">Gross</th>
-                          <th className="p-2 text-center">Net</th>
-                          <th className="p-2 text-center">STB Pts</th>
-                          <th className="p-2 text-center">Quota +/-</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        {[...playerStats].sort((a,b) => a.rawNetToPar - b.rawNetToPar).map(p => (
-                          <tr key={p.id}>
-                            <td className="p-2 font-bold text-white flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
-                              {p.name}
-                            </td>
-                            <td className="p-2 text-center font-mono">{p.totalGross} ({p.scoreToPar})</td>
-                            <td className="p-2 text-center font-mono font-bold text-emerald-400">{p.totalNet} ({p.netToPar})</td>
-                            <td className="p-2 text-center font-mono font-bold text-amber-400">{p.stablefordPoints}</td>
-                            <td className={`p-2 text-center font-mono font-bold ${p.rawQuotaDiff >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{p.quotaDiff}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
               </div>
             )}
 
-            {/* TAB 3: COURSE SETUP & SAVED COURSE LIBRARY */}
+            {/* TAB 3: COURSE SETUP & PERMANENT LIBRARY */}
             {activeTab === 'setup' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1103,12 +1073,12 @@
                       onClick={handleSaveCurrentCourseToLibrary}
                       className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs shadow active:scale-95 transition"
                     >
-                      💾 Save Course to Library
+                      💾 Save Course
                     </button>
                   )}
                 </div>
 
-                {/* SAVED COURSES LIBRARY CARDS */}
+                {/* SAVED COURSES LIBRARY */}
                 <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider">Permanent Course Library</span>
@@ -1148,7 +1118,6 @@
                   </div>
                 </div>
 
-                {/* Current Course Editor */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Course Name</label>
@@ -1167,7 +1136,6 @@
                   </div>
                 </div>
 
-                {/* Hole-by-Hole Editor */}
                 <div className="space-y-1.5">
                   <span className="text-[11px] font-bold text-slate-400 block uppercase">Hole Pars & HCP Ratings</span>
                   <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
@@ -1206,13 +1174,13 @@
               </div>
             )}
 
-            {/* TAB 4: PLAYERS & SAVED GOLFER ROSTER */}
+            {/* TAB 4: PLAYERS & PERMANENT ROSTER */}
             {activeTab === 'roster' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-sm font-black text-white">Active Round Lineup</h2>
-                    <p className="text-[11px] text-slate-400">{players.length} golfers in today's match</p>
+                    <p className="text-[11px] text-slate-400">{players.length} golfers today</p>
                   </div>
                   
                   {accessMode === 'rw' && (
@@ -1233,7 +1201,6 @@
                   )}
                 </div>
 
-                {/* Active Round Players List */}
                 <div className="space-y-2">
                   {players.map((player) => (
                     <div key={player.id} className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 space-y-1.5">
@@ -1246,7 +1213,7 @@
                       </div>
                       <div className="flex items-center justify-between pt-0.5">
                         <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-slate-400">HCP Index:</span>
+                          <span className="text-[10px] text-slate-400">HCP:</span>
                           <input type="number" disabled={accessMode === 'ro'} value={player.hcp} onChange={e => handleUpdatePlayer(player.id, 'hcp', Number(e.target.value))} className="w-12 bg-slate-800 border border-slate-700 rounded-md px-1 py-0.5 text-xs font-mono text-center text-white" />
                         </div>
                         <div className="flex items-center gap-1">
@@ -1261,11 +1228,10 @@
                   ))}
                 </div>
 
-                {/* Save Current Round Players to Permanent Roster */}
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between">
                   <div>
                     <span className="text-xs font-bold text-white block">Save Players to Roster</span>
-                    <span className="text-[10px] text-slate-400">Save current golfers & HCPs for quick reuse</span>
+                    <span className="text-[10px] text-slate-400">Store current golfers permanently</span>
                   </div>
                   <button 
                     onClick={handleSaveCurrentPlayersToRoster}
@@ -1275,9 +1241,8 @@
                   </button>
                 </div>
 
-                {/* Saved Rolodex Overview */}
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider">Trip Golfer Rolodex ({savedRoster.length})</span>
+                  <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider">Permanent Golfer Rolodex ({savedRoster.length})</span>
                   <div className="divide-y divide-slate-800">
                     {savedRoster.map(sr => (
                       <div key={sr.id} className="py-1.5 flex items-center justify-between text-xs">
@@ -1291,7 +1256,7 @@
                             onClick={() => handleAddPlayerFromSavedRoster(sr)}
                             className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/30"
                           >
-                            + Add to Round
+                            + Add
                           </button>
                           <button 
                             onClick={() => handleDeletePlayerFromRoster(sr.id, sr.name)}
@@ -1304,16 +1269,6 @@
                     ))}
                   </div>
                 </div>
-
-                {/* Wagers Config */}
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Wager Stake</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-emerald-400 font-bold">$</span>
-                    <input type="number" disabled={accessMode === 'ro'} value={pointsWager} onChange={e => setPointsWager(Number(e.target.value))} className="w-20 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 font-mono text-xs text-white" />
-                    <span className="text-[11px] text-slate-400">per point or skin</span>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -1324,7 +1279,7 @@
 
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
                   <span className="text-[11px] font-bold text-slate-300 block">Live Share Links</span>
-                  <button onClick={() => handleGenerateShareLink('ro')} className="w-full py-2 rounded-lg bg-blue-600 font-bold text-xs text-white active:scale-95 transition">Copy Spectator Link (Read Only)</button>
+                  <button onClick={() => handleGenerateShareLink('ro')} className="w-full py-2 rounded-lg bg-blue-600 font-bold text-xs text-white active:scale-95 transition">Copy Viewer Link (Read Only)</button>
                   <button onClick={() => handleGenerateShareLink('rw')} className="w-full py-2 rounded-lg bg-emerald-600 font-black text-xs text-slate-950 active:scale-95 transition">Copy Scorer Link (Read / Write)</button>
                 </div>
 
@@ -1338,7 +1293,7 @@
 
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
                   <span className="text-[11px] font-bold text-slate-300 block">Active Round Management</span>
-                  <p className="text-[10px] text-slate-400">Scores save automatically. Tapping reset will clear today's scores, but your course library and player rolodex will be preserved.</p>
+                  <p className="text-[10px] text-slate-400">Scores save automatically. Tapping reset will clear active scores, but your course library and player rolodex will remain intact.</p>
                   <div className="flex gap-2">
                     <button onClick={handleExportCSV} className="flex-1 py-1.5 rounded-lg bg-slate-800 text-xs font-bold border border-slate-700 active:scale-95 transition">Download CSV</button>
                     {accessMode === 'rw' && (

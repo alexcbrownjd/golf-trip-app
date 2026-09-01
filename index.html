@@ -42,11 +42,15 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    const STORAGE_KEY = 'GOLF_TRIP_MASTER_PERSIST_V1';
+    const STORAGE_KEY_ROUND = 'GOLF_TRIP_ACTIVE_ROUND_V9';
+    const STORAGE_KEY_COURSES = 'GOLF_TRIP_SAVED_COURSES_V9';
+    const STORAGE_KEY_ROSTER = 'GOLF_TRIP_SAVED_ROSTER_V9';
 
-    const PRESET_COURSES = {
-      pinehurst: {
+    const DEFAULT_COURSES = [
+      {
+        id: 'pinehurst',
         name: "Pinehurst No. 2",
+        holesCount: 18,
         holes: [
           { num: 1, par: 4, hcp: 8, yardage: 404 },
           { num: 2, par: 4, hcp: 4, yardage: 507 },
@@ -68,8 +72,10 @@
           { num: 18, par: 4, hcp: 1, yardage: 451 }
         ]
       },
-      pebble: {
+      {
+        id: 'pebble',
         name: "Pebble Beach Golf Links",
+        holesCount: 18,
         holes: [
           { num: 1, par: 4, hcp: 8, yardage: 377 },
           { num: 2, par: 5, hcp: 10, yardage: 502 },
@@ -91,8 +97,10 @@
           { num: 18, par: 5, hcp: 3, yardage: 543 }
         ]
       },
-      executive9: {
-        name: "Cypress Dunes (9-Hole Executive)",
+      {
+        id: 'executive9',
+        name: "Cypress Dunes (9-Hole Exec)",
+        holesCount: 9,
         holes: [
           { num: 1, par: 4, hcp: 3, yardage: 335 },
           { num: 2, par: 3, hcp: 7, yardage: 150 },
@@ -105,7 +113,16 @@
           { num: 9, par: 5, hcp: 4, yardage: 510 }
         ]
       }
-    };
+    ];
+
+    const DEFAULT_SAVED_PLAYERS = [
+      { id: 'sp1', name: 'Alex M.', hcp: 8, color: '#10B981' },
+      { id: 'sp2', name: 'Jake T.', hcp: 14, color: '#3B82F6' },
+      { id: 'sp3', name: 'Ryan C.', hcp: 10, color: '#F59E0B' },
+      { id: 'sp4', name: 'Dave K.', hcp: 18, color: '#EC4899' },
+      { id: 'sp5', name: 'Chris B.', hcp: 12, color: '#8B5CF6' },
+      { id: 'sp6', name: 'Matt S.', hcp: 6, color: '#14B8A6' }
+    ];
 
     const GAME_TYPES = [
       { id: 'best_ball', name: 'Best Ball (Four-Ball)', short: 'Best Ball', desc: 'Lowest gross/net ball on each hole counts for the team score.' },
@@ -122,23 +139,20 @@
 
     const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
 
-    // Helper: Safely load initial persisted state BEFORE React renders
-    function getStoredState() {
+    function safeLoadJSON(key, fallback) {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = localStorage.getItem(key);
         if (raw) return JSON.parse(raw);
       } catch (e) {
-        console.error("Failed to parse localStorage", e);
+        console.error("Local load failed for " + key, e);
       }
-      return null;
+      return fallback;
     }
-
-    const savedData = getStoredState();
 
     function App() {
       const isInitialMount = useRef(true);
 
-      // Access mode (Scorer vs Viewer)
+      // Access Mode (Scorer vs Spectator)
       const [accessMode, setAccessMode] = useState(() => {
         try {
           const hash = window.location.hash;
@@ -150,78 +164,69 @@
       const [activeTab, setActiveTab] = useState('live');
       const [toastMessage, setToastMessage] = useState('');
 
-      // Persistent Course & Game State
-      const [courseName, setCourseName] = useState(() => savedData?.courseName || 'Pinehurst No. 2');
-      const [roundDate, setRoundDate] = useState(() => savedData?.roundDate || new Date().toISOString().split('T')[0]);
-      const [holesCount, setHolesCount] = useState(() => savedData?.holesCount || 18);
-      const [holes, setHoles] = useState(() => savedData?.holes || PRESET_COURSES.pinehurst.holes);
+      // PERMANENT LIBRARIES (Courses & Saved Golfers)
+      const [savedCourses, setSavedCourses] = useState(() => safeLoadJSON(STORAGE_KEY_COURSES, DEFAULT_COURSES));
+      const [savedRoster, setSavedRoster] = useState(() => safeLoadJSON(STORAGE_KEY_ROSTER, DEFAULT_SAVED_PLAYERS));
+
+      // ACTIVE TOURNAMENT ROUND STATE
+      const savedRound = safeLoadJSON(STORAGE_KEY_ROUND, null);
+
+      const [courseName, setCourseName] = useState(() => savedRound?.courseName || 'Pinehurst No. 2');
+      const [roundDate, setRoundDate] = useState(() => savedRound?.roundDate || new Date().toISOString().split('T')[0]);
+      const [holesCount, setHolesCount] = useState(() => savedRound?.holesCount || 18);
+      const [holes, setHoles] = useState(() => savedRound?.holes || DEFAULT_COURSES[0].holes);
       
-      const [players, setPlayers] = useState(() => savedData?.players || [
+      const [players, setPlayers] = useState(() => savedRound?.players || [
         { id: 'p1', name: 'Alex M.', hcp: 8, team: 'A', color: '#10B981' },
         { id: 'p2', name: 'Jake T.', hcp: 14, team: 'A', color: '#3B82F6' },
         { id: 'p3', name: 'Ryan C.', hcp: 10, team: 'B', color: '#F59E0B' },
         { id: 'p4', name: 'Dave K.', hcp: 18, team: 'B', color: '#EC4899' },
       ]);
 
-      const [teams, setTeams] = useState(() => savedData?.teams || [
+      const [teams, setTeams] = useState(() => savedRound?.teams || [
         { id: 'A', name: 'Team Eagles' },
         { id: 'B', name: 'Team Birdies' }
       ]);
 
-      const [activeGame, setActiveGame] = useState(() => savedData?.activeGame || 'best_ball');
-      const [pointsWager, setPointsWager] = useState(() => savedData?.pointsWager || 10);
+      const [activeGame, setActiveGame] = useState(() => savedRound?.activeGame || 'best_ball');
+      const [pointsWager, setPointsWager] = useState(() => savedRound?.pointsWager || 10);
 
-      // Scoring Matrix (1..18 holes)
       const [scores, setScores] = useState(() => {
-        if (savedData?.scores && Object.keys(savedData.scores).length > 0) {
-          return savedData.scores;
-        }
+        if (savedRound?.scores && Object.keys(savedRound.scores).length > 0) return savedRound.scores;
         const initial = {};
         for (let i = 1; i <= 18; i++) initial[i] = { p1: null, p2: null, p3: null, p4: null };
         return initial;
       });
 
-      const [currentHole, setCurrentHole] = useState(() => savedData?.currentHole || 1);
+      const [currentHole, setCurrentHole] = useState(() => savedRound?.currentHole || 1);
       const [selectedPlayerId, setSelectedPlayerId] = useState('p1');
-      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState(() => savedData?.sheetsWebhookUrl || '');
+      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState(() => savedRound?.sheetsWebhookUrl || '');
       const [isSyncing, setIsSyncing] = useState(false);
       const [showOtherModal, setShowOtherModal] = useState(false);
       const [manualScoreInput, setManualScoreInput] = useState('');
+      const [showRosterPickerModal, setShowRosterPickerModal] = useState(false);
 
-      // Process URL State Payloads if opened via Share link (Only on explicit share import)
+      // Save Courses Library permanently whenever it changes
       useEffect(() => {
-        const hash = window.location.hash;
-        if (hash && hash.includes('state=')) {
-          try {
-            const params = new URLSearchParams(hash.replace(/^#/, ''));
-            const stateParam = params.get('state');
-            if (stateParam) {
-              const parsed = JSON.parse(decodeURIComponent(stateParam));
-              if (parsed.c) setCourseName(parsed.c);
-              if (parsed.d) setRoundDate(parsed.d);
-              if (parsed.h) setHolesCount(parsed.h);
-              if (parsed.hl) setHoles(parsed.hl);
-              if (parsed.p) setPlayers(parsed.p);
-              if (parsed.t) setTeams(parsed.t);
-              if (parsed.g) setActiveGame(parsed.g);
-              if (parsed.w) setPointsWager(parsed.w);
-              if (parsed.s) setScores(parsed.s);
-              showToast('Imported tournament from link!');
-            }
-          } catch (e) {
-            console.error("URL state load failed", e);
-          }
-        }
-      }, []);
+        try {
+          localStorage.setItem(STORAGE_KEY_COURSES, JSON.stringify(savedCourses));
+        } catch (e) {}
+      }, [savedCourses]);
 
-      // BULLETPROOF PERSISTENCE: Save state on every change, guarded against empty mounts
+      // Save Golfer Roster permanently whenever it changes
+      useEffect(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY_ROSTER, JSON.stringify(savedRoster));
+        } catch (e) {}
+      }, [savedRoster]);
+
+      // Save Active Round persistently
       useEffect(() => {
         if (isInitialMount.current) {
           isInitialMount.current = false;
           return;
         }
 
-        // Only persist if in Scorer mode (protects against spectators overwriting master data)
         if (accessMode === 'rw') {
           try {
             const payload = {
@@ -235,13 +240,10 @@
               pointsWager,
               scores,
               currentHole,
-              sheetsWebhookUrl,
-              lastSaved: new Date().toISOString()
+              sheetsWebhookUrl
             };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-          } catch (err) {
-            console.error("Local storage save error:", err);
-          }
+            localStorage.setItem(STORAGE_KEY_ROUND, JSON.stringify(payload));
+          } catch (e) {}
         }
       }, [courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl, accessMode]);
 
@@ -250,21 +252,83 @@
         setTimeout(() => setToastMessage(''), 3000);
       };
 
-      const loadPresetCourse = (presetKey) => {
+      // COURSE LIBRARY ACTIONS
+      const handleSaveCurrentCourseToLibrary = () => {
+        const courseId = `c_${Date.now()}`;
+        const newCourseEntry = {
+          id: courseId,
+          name: courseName.trim() || 'Custom Course',
+          holesCount: Number(holesCount),
+          holes: JSON.parse(JSON.stringify(holes.slice(0, holesCount)))
+        };
+
+        setSavedCourses(prev => {
+          const filtered = prev.filter(c => c.name.toLowerCase() !== newCourseEntry.name.toLowerCase());
+          return [newCourseEntry, ...filtered];
+        });
+        showToast(`Saved "${newCourseEntry.name}" to Course Library!`);
+      };
+
+      const handleLoadCourseFromLibrary = (courseObj) => {
         if (accessMode === 'ro') return;
-        const preset = PRESET_COURSES[presetKey];
-        if (preset) {
-          setCourseName(preset.name);
-          setHoles(preset.holes);
-          setHolesCount(preset.holes.length);
-          const newScores = {};
-          preset.holes.forEach(h => {
-            newScores[h.num] = {};
-            players.forEach(p => { newScores[h.num][p.id] = null; });
-          });
-          setScores(newScores);
-          showToast(`Loaded ${preset.name}!`);
+        setCourseName(courseObj.name);
+        setHolesCount(courseObj.holesCount);
+        setHoles(JSON.parse(JSON.stringify(courseObj.holes)));
+        
+        // Reset scores matrix safely for new course layout
+        const newScores = {};
+        for (let i = 1; i <= courseObj.holesCount; i++) {
+          newScores[i] = {};
+          players.forEach(p => { newScores[i][p.id] = null; });
         }
+        setScores(newScores);
+        setCurrentHole(1);
+        showToast(`Loaded "${courseObj.name}"!`);
+      };
+
+      const handleDeleteCourseFromLibrary = (id, name) => {
+        if (confirm(`Remove "${name}" from your course library?`)) {
+          setSavedCourses(prev => prev.filter(c => c.id !== id));
+          showToast(`Removed "${name}" from library.`);
+        }
+      };
+
+      // GOLFER ROSTER LIBRARY ACTIONS
+      const handleSaveCurrentPlayersToRoster = () => {
+        setSavedRoster(prev => {
+          const rosterMap = new Map(prev.map(p => [p.name.toLowerCase(), p]));
+          players.forEach(p => {
+            rosterMap.set(p.name.toLowerCase(), {
+              id: p.id.startsWith('sp') ? p.id : `sp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+              name: p.name.trim(),
+              hcp: Number(p.hcp) || 0,
+              color: p.color
+            });
+          });
+          return Array.from(rosterMap.values());
+        });
+        showToast('Saved all active players to Trip Roster!');
+      };
+
+      const handleAddPlayerFromSavedRoster = (savedPlayer) => {
+        if (players.some(p => p.name.toLowerCase() === savedPlayer.name.toLowerCase())) {
+          showToast(`${savedPlayer.name} is already in the round!`);
+          return;
+        }
+        const newPlayerInstance = {
+          id: `p_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          name: savedPlayer.name,
+          hcp: Number(savedPlayer.hcp) || 0,
+          team: players.length % 2 === 0 ? 'A' : 'B',
+          color: savedPlayer.color || COLOR_PALETTE[players.length % COLOR_PALETTE.length]
+        };
+        setPlayers(prev => [...prev, newPlayerInstance]);
+        showToast(`Added ${savedPlayer.name} to Round!`);
+      };
+
+      const handleDeletePlayerFromRoster = (id, name) => {
+        setSavedRoster(prev => prev.filter(p => p.id !== id));
+        showToast(`Removed ${name} from saved roster.`);
       };
 
       const getPlayerHoleStrokes = (playerHcp, holeHcpIndex) => {
@@ -302,18 +366,18 @@
         }
       };
 
-      const handleAddPlayer = () => {
+      const handleAddBlankPlayer = () => {
         if (accessMode === 'ro') return;
-        const newId = `p${Date.now()}`;
+        const newId = `p_${Date.now()}`;
         const color = COLOR_PALETTE[players.length % COLOR_PALETTE.length];
         setPlayers(prev => [
           ...prev,
           { id: newId, name: `Player ${prev.length + 1}`, hcp: 10, team: prev.length % 2 === 0 ? 'A' : 'B', color }
         ]);
-        showToast('New golfer added!');
+        showToast('Added golfer slot');
       };
 
-      const handleDeletePlayer = (id) => {
+      const handleDeleteActivePlayer = (id) => {
         if (accessMode === 'ro') return;
         if (players.length <= 1) {
           showToast('Must keep at least 1 player');
@@ -332,15 +396,13 @@
         setHoles(prev => prev.map(h => h.num === holeNum ? { ...h, [field]: Number(val) || val } : h));
       };
 
-      // Manual Reset Trigger
       const handleManualReset = () => {
-        if (confirm("Are you sure you want to clear all scores and start a new round?")) {
+        if (confirm("Reset active round scores? (Your saved courses & golfer profiles remain safe)")) {
           const freshScores = {};
-          for (let i = 1; i <= 18; i++) freshScores[i] = {};
+          for (let i = 1; i <= holesCount; i++) freshScores[i] = {};
           setScores(freshScores);
           setCurrentHole(1);
-          localStorage.removeItem(STORAGE_KEY);
-          showToast('Round scores reset successfully!');
+          showToast('Round scores reset!');
         }
       };
 
@@ -409,7 +471,7 @@
         });
       }, [players, holes, holesCount, scores]);
 
-      // Game Engine
+      // Game Engine Calculations
       const gameEngine = useMemo(() => {
         const teamA = playerStats.filter(p => p.team === 'A');
         const teamB = playerStats.filter(p => p.team === 'B');
@@ -705,10 +767,46 @@
             </div>
           )}
 
+          {/* Quick Golfer Rolodex Modal */}
+          {showRosterPickerModal && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 w-full max-w-xs space-y-3 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-black text-white">Add From Saved Roster</h3>
+                    <p className="text-[11px] text-slate-400">Tap a golfer to add them to today's round</p>
+                  </div>
+                  <button onClick={() => setShowRosterPickerModal(false)} className="text-slate-400 hover:text-white font-bold p-1">✕</button>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto space-y-1.5 divide-y divide-slate-800">
+                  {savedRoster.map(sp => (
+                    <div key={sp.id} className="pt-1.5 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: sp.color }} />
+                        <span className="text-xs font-bold text-white">{sp.name}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">HCP {sp.hcp}</span>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          handleAddPlayerFromSavedRoster(sp);
+                          setShowRosterPickerModal(false);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-[11px] active:scale-95 transition"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Main App Body */}
           <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
 
-            {/* TAB 1: LIVE SCORING VIEW */}
+            {/* TAB 1: DYNAMIC LIVE SCORING VIEW */}
             {activeTab === 'live' && (
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 
@@ -794,7 +892,7 @@
                     )}
                   </div>
 
-                  {/* Physical Visual Scorecard Grid */}
+                  {/* Physical Scorecard Grid */}
                   <div className="flex-1 overflow-auto p-1.5">
                     <table className="min-w-full text-center border-collapse text-[11px]">
                       <thead>
@@ -995,32 +1093,69 @@
               </div>
             )}
 
-            {/* TAB 3: COURSE SETUP */}
+            {/* TAB 3: COURSE SETUP & SAVED COURSE LIBRARY */}
             {activeTab === 'setup' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-black text-white">Course Configuration</h2>
-                  {accessMode === 'ro' && <span className="text-[10px] text-amber-400 font-bold">Read Only</span>}
+                  {accessMode === 'rw' && (
+                    <button 
+                      onClick={handleSaveCurrentCourseToLibrary}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs shadow active:scale-95 transition"
+                    >
+                      💾 Save Course to Library
+                    </button>
+                  )}
                 </div>
 
-                {accessMode === 'rw' && (
-                  <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 space-y-1.5">
-                    <span className="text-[11px] font-bold text-slate-300 block">Preset Courses</span>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button onClick={() => loadPresetCourse('pinehurst')} className="p-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 active:scale-95 transition">Pinehurst #2</button>
-                      <button onClick={() => loadPresetCourse('pebble')} className="p-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 active:scale-95 transition">Pebble Beach</button>
-                      <button onClick={() => loadPresetCourse('executive9')} className="p-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 active:scale-95 transition">9-Hole Exec</button>
-                    </div>
+                {/* SAVED COURSES LIBRARY CARDS */}
+                <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider">Permanent Course Library</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{savedCourses.length} saved</span>
                   </div>
-                )}
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {savedCourses.map(courseItem => {
+                      const isCurrent = courseItem.name.toLowerCase() === courseName.toLowerCase();
+                      return (
+                        <div key={courseItem.id} className={`p-2 rounded-xl border flex items-center justify-between ${isCurrent ? 'bg-emerald-950/40 border-emerald-500/50' : 'bg-slate-800/80 border-slate-700'}`}>
+                          <div className="truncate mr-2">
+                            <span className="text-xs font-bold text-white block truncate">{courseItem.name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">{courseItem.holesCount} Holes • Par {courseItem.holes.reduce((a,b)=>a+b.par,0)}</span>
+                          </div>
+                          
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => handleLoadCourseFromLibrary(courseItem)}
+                              disabled={isCurrent}
+                              className={`px-2 py-1 rounded-md text-[10px] font-black uppercase transition ${isCurrent ? 'bg-emerald-600 text-slate-950 font-bold opacity-80' : 'bg-slate-700 hover:bg-slate-600 text-slate-100 active:scale-95'}`}
+                            >
+                              {isCurrent ? 'Active' : 'Load'}
+                            </button>
+                            {savedCourses.length > 1 && (
+                              <button 
+                                onClick={() => handleDeleteCourseFromLibrary(courseItem.id, courseItem.name)}
+                                className="p-1 text-slate-400 hover:text-red-400 transition"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
 
+                {/* Current Course Editor */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Course Name</label>
                     <input type="text" disabled={accessMode === 'ro'} value={courseName} onChange={e => setCourseName(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Date</label>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Round Date</label>
                     <input type="date" disabled={accessMode === 'ro'} value={roundDate} onChange={e => setRoundDate(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
                   </div>
                   <div>
@@ -1032,6 +1167,7 @@
                   </div>
                 </div>
 
+                {/* Hole-by-Hole Editor */}
                 <div className="space-y-1.5">
                   <span className="text-[11px] font-bold text-slate-400 block uppercase">Hole Pars & HCP Ratings</span>
                   <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
@@ -1070,16 +1206,34 @@
               </div>
             )}
 
-            {/* TAB 4: PLAYERS & TEAMS */}
+            {/* TAB 4: PLAYERS & SAVED GOLFER ROSTER */}
             {activeTab === 'roster' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-black text-white">Trip Players & Teams</h2>
+                  <div>
+                    <h2 className="text-sm font-black text-white">Active Round Lineup</h2>
+                    <p className="text-[11px] text-slate-400">{players.length} golfers in today's match</p>
+                  </div>
+                  
                   {accessMode === 'rw' && (
-                    <button onClick={handleAddPlayer} className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs shadow active:scale-95 transition">+ Add Golfer</button>
+                    <div className="flex items-center gap-1.5">
+                      <button 
+                        onClick={() => setShowRosterPickerModal(true)}
+                        className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow active:scale-95 transition"
+                      >
+                        👥 Load Saved
+                      </button>
+                      <button 
+                        onClick={handleAddBlankPlayer} 
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs shadow active:scale-95 transition"
+                      >
+                        + New
+                      </button>
+                    </div>
                   )}
                 </div>
 
+                {/* Active Round Players List */}
                 <div className="space-y-2">
                   {players.map((player) => (
                     <div key={player.id} className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 space-y-1.5">
@@ -1087,12 +1241,12 @@
                         <input type="color" disabled={accessMode === 'ro'} value={player.color} onChange={e => handleUpdatePlayer(player.id, 'color', e.target.value)} className="w-6 h-6 rounded-full cursor-pointer bg-transparent border-none" />
                         <input type="text" disabled={accessMode === 'ro'} value={player.name} onChange={e => handleUpdatePlayer(player.id, 'name', e.target.value)} className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs font-bold text-white outline-none" />
                         {accessMode === 'rw' && (
-                          <button onClick={() => handleDeletePlayer(player.id)} className="p-1 text-red-400 hover:text-red-300">🗑️</button>
+                          <button onClick={() => handleDeleteActivePlayer(player.id)} className="p-1 text-red-400 hover:text-red-300">🗑️</button>
                         )}
                       </div>
                       <div className="flex items-center justify-between pt-0.5">
                         <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-slate-400">HCP:</span>
+                          <span className="text-[10px] text-slate-400">HCP Index:</span>
                           <input type="number" disabled={accessMode === 'ro'} value={player.hcp} onChange={e => handleUpdatePlayer(player.id, 'hcp', Number(e.target.value))} className="w-12 bg-slate-800 border border-slate-700 rounded-md px-1 py-0.5 text-xs font-mono text-center text-white" />
                         </div>
                         <div className="flex items-center gap-1">
@@ -1107,6 +1261,51 @@
                   ))}
                 </div>
 
+                {/* Save Current Round Players to Permanent Roster */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-white block">Save Players to Roster</span>
+                    <span className="text-[10px] text-slate-400">Save current golfers & HCPs for quick reuse</span>
+                  </div>
+                  <button 
+                    onClick={handleSaveCurrentPlayersToRoster}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-emerald-400 active:scale-95 transition"
+                  >
+                    💾 Save Roster
+                  </button>
+                </div>
+
+                {/* Saved Rolodex Overview */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+                  <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider">Trip Golfer Rolodex ({savedRoster.length})</span>
+                  <div className="divide-y divide-slate-800">
+                    {savedRoster.map(sr => (
+                      <div key={sr.id} className="py-1.5 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sr.color }} />
+                          <span className="font-bold text-white">{sr.name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">HCP {sr.hcp}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button 
+                            onClick={() => handleAddPlayerFromSavedRoster(sr)}
+                            className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/30"
+                          >
+                            + Add to Round
+                          </button>
+                          <button 
+                            onClick={() => handleDeletePlayerFromRoster(sr.id, sr.name)}
+                            className="text-slate-500 hover:text-red-400 p-0.5"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Wagers Config */}
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase">Wager Stake</span>
                   <div className="flex items-center gap-1.5">
@@ -1138,8 +1337,8 @@
                 </div>
 
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-bold text-slate-300 block">Tournament Storage & Reset</span>
-                  <p className="text-[10px] text-slate-400">Data automatically saves across sessions. Tap below only to wipe and start a fresh tournament.</p>
+                  <span className="text-[11px] font-bold text-slate-300 block">Active Round Management</span>
+                  <p className="text-[10px] text-slate-400">Scores save automatically. Tapping reset will clear today's scores, but your course library and player rolodex will be preserved.</p>
                   <div className="flex gap-2">
                     <button onClick={handleExportCSV} className="flex-1 py-1.5 rounded-lg bg-slate-800 text-xs font-bold border border-slate-700 active:scale-95 transition">Download CSV</button>
                     {accessMode === 'rw' && (
@@ -1164,7 +1363,7 @@
             </button>
             <button onClick={() => setActiveTab('setup')} className={`flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === 'setup' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-sm">⚙️</span>
-              <span className="text-[9px] uppercase tracking-wider">Course</span>
+              <span className="text-[9px] uppercase tracking-wider">Courses</span>
             </button>
             <button onClick={() => setActiveTab('roster')} className={`flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === 'roster' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
               <span className="text-sm">👥</span>

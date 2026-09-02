@@ -3,13 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Golf Trip Live Scoring</title>
+  <meta name="theme-color" content="#020617" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Golf Trip Live Tournament Hub</title>
 
-  <!-- Tailwind CSS, React, Babel Standalone & localForage (IndexedDB Engine) -->
+  <!-- Production Tailwind CDN & Lightweight IndexedDB -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 
   <style>
@@ -21,6 +23,7 @@
       overscroll-behavior-y: none;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
+      user-select: none;
     }
     .safe-top {
       padding-top: max(0.5rem, var(--sat));
@@ -37,1449 +40,966 @@
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 overflow-hidden font-sans select-none antialiased">
+<body class="bg-slate-950 text-slate-100 overflow-hidden font-sans antialiased">
   <div id="root"></div>
 
-  <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+  <script>
+    (function () {
+      const { useState, useEffect, useMemo, useRef, useCallback, createElement: h } = React;
 
-    localforage.config({
-      name: 'GolfTripSync_DB_V2',
-      storeName: 'trip_data'
-    });
+      // Initialize local storage database
+      localforage.config({
+        name: 'GolfTripMaster_v2026',
+        storeName: 'golf_store'
+      });
 
-    const DB_KEY_TRIP_ID = 'ACTIVE_TRIP_ID';
-    const DB_KEY_SHEET_URL = 'CONFIG_SHEETS_URL';
-    const DB_KEY_ROUND = 'ACTIVE_ROUND_CACHE';
-    const DB_KEY_COURSES = 'SAVED_COURSES_LIB';
-    const DB_KEY_ROSTER = 'SAVED_ROSTER_LIB';
+      const DB_KEY_TRIP = 'TRIP_CONFIG';
+      const DB_KEY_ROUND = 'ACTIVE_ROUND_CELLS';
+      const DB_KEY_COURSES = 'COURSE_LIBRARY';
+      const DB_KEY_ROSTER = 'ROSTER_LIBRARY';
 
-    const DEFAULT_COURSES = [
-      {
-        id: 'pinehurst',
-        name: "Pinehurst No. 2",
-        holesCount: 18,
-        holes: [
-          { num: 1, par: 4, hcp: 8, yardage: 404 },
-          { num: 2, par: 4, hcp: 4, yardage: 507 },
-          { num: 3, par: 4, hcp: 14, yardage: 387 },
-          { num: 4, par: 5, hcp: 6, yardage: 569 },
-          { num: 5, par: 4, hcp: 2, yardage: 472 },
-          { num: 6, par: 3, hcp: 12, yardage: 228 },
-          { num: 7, par: 4, hcp: 16, yardage: 424 },
-          { num: 8, par: 4, hcp: 10, yardage: 502 },
-          { num: 9, par: 3, hcp: 18, yardage: 191 },
-          { num: 10, par: 5, hcp: 5, yardage: 617 },
-          { num: 11, par: 4, hcp: 7, yardage: 483 },
-          { num: 12, par: 4, hcp: 13, yardage: 456 },
-          { num: 13, par: 4, hcp: 15, yardage: 382 },
-          { num: 14, par: 4, hcp: 3, yardage: 473 },
-          { num: 15, par: 3, hcp: 17, yardage: 202 },
-          { num: 16, par: 5, hcp: 9, yardage: 534 },
-          { num: 17, par: 3, hcp: 11, yardage: 205 },
-          { num: 18, par: 4, hcp: 1, yardage: 451 }
-        ]
-      },
-      {
-        id: 'pebble',
-        name: "Pebble Beach Golf Links",
-        holesCount: 18,
-        holes: [
-          { num: 1, par: 4, hcp: 8, yardage: 377 },
-          { num: 2, par: 5, hcp: 10, yardage: 502 },
-          { num: 3, par: 4, hcp: 12, yardage: 390 },
-          { num: 4, par: 4, hcp: 16, yardage: 326 },
-          { num: 5, par: 3, hcp: 14, yardage: 192 },
-          { num: 6, par: 5, hcp: 2, yardage: 506 },
-          { num: 7, par: 3, hcp: 18, yardage: 106 },
-          { num: 8, par: 4, hcp: 6, yardage: 427 },
-          { num: 9, par: 4, hcp: 4, yardage: 481 },
-          { num: 10, par: 4, hcp: 7, yardage: 446 },
-          { num: 11, par: 4, hcp: 5, yardage: 373 },
-          { num: 12, par: 3, hcp: 17, yardage: 201 },
-          { num: 13, par: 4, hcp: 9, yardage: 403 },
-          { num: 14, par: 5, hcp: 1, yardage: 572 },
-          { num: 15, par: 4, hcp: 13, yardage: 396 },
-          { num: 16, par: 4, hcp: 11, yardage: 401 },
-          { num: 17, par: 3, hcp: 15, yardage: 178 },
-          { num: 18, par: 5, hcp: 3, yardage: 543 }
-        ]
-      }
-    ];
+      const DEFAULT_COURSES = [
+        {
+          id: 'pinehurst_2',
+          name: "Pinehurst No. 2",
+          holesCount: 18,
+          holes: [
+            { num: 1, par: 4, hcp: 8, yardage: 404 },
+            { num: 2, par: 4, hcp: 4, yardage: 507 },
+            { num: 3, par: 4, hcp: 14, yardage: 387 },
+            { num: 4, par: 5, hcp: 6, yardage: 569 },
+            { num: 5, par: 4, hcp: 2, yardage: 472 },
+            { num: 6, par: 3, hcp: 12, yardage: 228 },
+            { num: 7, par: 4, hcp: 16, yardage: 424 },
+            { num: 8, par: 4, hcp: 10, yardage: 502 },
+            { num: 9, par: 3, hcp: 18, yardage: 191 },
+            { num: 10, par: 5, hcp: 5, yardage: 617 },
+            { num: 11, par: 4, hcp: 7, yardage: 483 },
+            { num: 12, par: 4, hcp: 13, yardage: 456 },
+            { num: 13, par: 4, hcp: 15, yardage: 382 },
+            { num: 14, par: 4, hcp: 3, yardage: 473 },
+            { num: 15, par: 3, hcp: 17, yardage: 202 },
+            { num: 16, par: 5, hcp: 9, yardage: 534 },
+            { num: 17, par: 3, hcp: 11, yardage: 205 },
+            { num: 18, par: 4, hcp: 1, yardage: 451 }
+          ]
+        },
+        {
+          id: 'pebble_beach',
+          name: "Pebble Beach",
+          holesCount: 18,
+          holes: [
+            { num: 1, par: 4, hcp: 8, yardage: 377 },
+            { num: 2, par: 5, hcp: 10, yardage: 502 },
+            { num: 3, par: 4, hcp: 12, yardage: 390 },
+            { num: 4, par: 4, hcp: 16, yardage: 326 },
+            { num: 5, par: 3, hcp: 14, yardage: 192 },
+            { num: 6, par: 5, hcp: 2, yardage: 506 },
+            { num: 7, par: 3, hcp: 18, yardage: 106 },
+            { num: 8, par: 4, hcp: 6, yardage: 427 },
+            { num: 9, par: 4, hcp: 4, yardage: 481 },
+            { num: 10, par: 4, hcp: 7, yardage: 446 },
+            { num: 11, par: 4, hcp: 5, yardage: 373 },
+            { num: 12, par: 3, hcp: 17, yardage: 201 },
+            { num: 13, par: 4, hcp: 9, yardage: 403 },
+            { num: 14, par: 5, hcp: 1, yardage: 572 },
+            { num: 15, par: 4, hcp: 13, yardage: 396 },
+            { num: 16, par: 4, hcp: 11, yardage: 401 },
+            { num: 17, par: 3, hcp: 15, yardage: 178 },
+            { num: 18, par: 5, hcp: 3, yardage: 543 }
+          ]
+        }
+      ];
 
-    const DEFAULT_SAVED_PLAYERS = [
-      { id: 'sp1', name: 'Alex M.', hcp: 8, color: '#10B981' },
-      { id: 'sp2', name: 'Jake T.', hcp: 14, color: '#3B82F6' },
-      { id: 'sp3', name: 'Ryan C.', hcp: 10, color: '#F59E0B' },
-      { id: 'sp4', name: 'Dave K.', hcp: 18, color: '#EC4899' }
-    ];
-
-    const GAME_TYPES = [
-      { id: 'best_ball', name: 'Best Ball (Four-Ball)', desc: 'Lowest gross/net ball on each hole counts for the team score.' },
-      { id: 'scramble', name: 'Scramble', desc: 'All players hit, pick best shot, all play from there until holed.' },
-      { id: 'vegas', name: 'Vegas (High-Low)', desc: 'Teammates combine scores (e.g. 4 & 5 make 45). Birdie flips opponent score!' },
-      { id: 'skins', name: 'Skins with Carryovers', desc: 'Lowest unique score wins the skin. Ties carry over to next hole.' },
-      { id: 'wolf', name: 'Wolf (Rotating Captain)', desc: 'Player has honor, watches drives, selects partner or goes Lone Wolf.' },
-      { id: 'stableford', name: 'Stableford Points', desc: 'Points per hole: Dbl Bogey=0, Bogey=1, Par=2, Birdie=3, Eagle=4, Albatross=5.' },
-      { id: 'nassau', name: 'Nassau (2-2-2)', desc: 'Three separate matches in one: Front 9 winner, Back 9 winner, and Overall 18.' },
-      { id: 'shamble', name: 'Shamble', desc: 'Best drive chosen, each player plays own ball into cup from there.' },
-      { id: 'match_play', name: 'Match Play', desc: 'Hole-by-hole competition. Winning a hole earns 1 point.' },
-      { id: 'quota', name: 'Quota (Chicago)', desc: 'Points scored against target quota (Quota = 36 - Handicap).' }
-    ];
-
-    const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
-
-    function App() {
-      const [isReady, setIsReady] = useState(false);
-      const [accessMode, setAccessMode] = useState('rw');
-      const [activeTab, setActiveTab] = useState('live');
-      const [toastMessage, setToastMessage] = useState('');
-      const [lastCloudSyncTime, setLastCloudSyncTime] = useState(null);
-
-      // Cloud Identity Settings
-      const [tripId, setTripId] = useState('GolfTrip2026');
-      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState('');
-      const [isSyncing, setIsSyncing] = useState(false);
-
-      // Tournament Libraries
-      const [savedCourses, setSavedCourses] = useState(DEFAULT_COURSES);
-      const [savedRoster, setSavedRoster] = useState(DEFAULT_SAVED_PLAYERS);
-
-      // Active Round State
-      const [courseName, setCourseName] = useState('Pinehurst No. 2');
-      const [roundDate, setRoundDate] = useState(new Date().toISOString().split('T')[0]);
-      const [holesCount, setHolesCount] = useState(18);
-      const [holes, setHoles] = useState(DEFAULT_COURSES[0].holes);
-      
-      const [players, setPlayers] = useState([
+      const DEFAULT_PLAYERS = [
         { id: 'p1', name: 'Alex M.', hcp: 8, team: 'A', color: '#10B981' },
         { id: 'p2', name: 'Jake T.', hcp: 14, team: 'A', color: '#3B82F6' },
         { id: 'p3', name: 'Ryan C.', hcp: 10, team: 'B', color: '#F59E0B' },
-        { id: 'p4', name: 'Dave K.', hcp: 18, team: 'B', color: '#EC4899' },
-      ]);
+        { id: 'p4', name: 'Dave K.', hcp: 18, team: 'B', color: '#EC4899' }
+      ];
 
-      const [teams, setTeams] = useState([
-        { id: 'A', name: 'Team Eagles' },
-        { id: 'B', name: 'Team Birdies' }
-      ]);
+      const GAME_TYPES = [
+        { id: 'best_ball', name: 'Best Ball (Four-Ball)', desc: 'Lowest net score among teammates counts for the team on each hole.' },
+        { id: 'scramble', name: 'Scramble', desc: 'All golfers tee off, best shot chosen, all play from that spot until holed.' },
+        { id: 'vegas', name: 'Vegas (High-Low)', desc: 'Teammates combine scores (e.g., 4 & 5 make 45). Birdie inverts opponent score!' },
+        { id: 'skins', name: 'Skins with Carryovers', desc: 'Lowest unique net score wins hole skin. Ties carry over to the next hole.' },
+        { id: 'wolf', name: 'Wolf (Rotating Captain)', desc: 'Honor player tees off, chooses partner or goes Lone Wolf for double points.' },
+        { id: 'stableford', name: 'Stableford Points', desc: 'Points per hole: Dbl Bogey=0, Bogey=1, Par=2, Birdie=3, Eagle=4, Albatross=5.' },
+        { id: 'nassau', name: 'Nassau (2-2-2)', desc: 'Three separate matches: Front 9 winner, Back 9 winner, and Total 18 winner.' },
+        { id: 'shamble', name: 'Shamble', desc: 'Best drive chosen, all players hit own ball into cup from there.' },
+        { id: 'match_play', name: 'Match Play', desc: 'Hole-by-hole competition. Winning a hole earns 1 point. Up/Down tracker.' },
+        { id: 'quota', name: 'Quota (Chicago)', desc: 'Points scored against target handicap quota (Quota = 36 - Handicap).' }
+      ];
 
-      const [activeGame, setActiveGame] = useState('best_ball');
-      const [pointsWager, setPointsWager] = useState(10);
+      const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
 
-      const [scores, setScores] = useState(() => {
-        const initial = {};
-        for (let i = 1; i <= 18; i++) initial[i] = { p1: null, p2: null, p3: null, p4: null };
-        return initial;
-      });
-
-      const [currentHole, setCurrentHole] = useState(1);
-      const [selectedPlayerId, setSelectedPlayerId] = useState('p1');
-      const [showOtherModal, setShowOtherModal] = useState(false);
-      const [manualScoreInput, setManualScoreInput] = useState('');
-      const [showRosterPickerModal, setShowRosterPickerModal] = useState(false);
-
-      // Mutex references to prevent race conditions & clashing requests
-      const localLastModifiedRef = useRef(0);
-      const isPushingRef = useRef(false);
-      const pendingPushRef = useRef(false);
-
-      const showToast = (msg) => {
-        setToastMessage(msg);
-        setTimeout(() => setToastMessage(''), 2200);
-      };
-
-      // SAFE SMART MERGE: Incoming Cloud Updates never overwrite newer local modifications
-      const mergeCloudState = useCallback((cloudData) => {
-        if (!cloudData || !cloudData.courseName) return;
-
-        // If user made a local modification in the last 4 seconds, ignore older incoming cloud polls
-        const timeSinceLocalEdit = Date.now() - localLastModifiedRef.current;
-        if (timeSinceLocalEdit < 4000 && accessMode === 'rw') {
-          return;
-        }
-
-        // Merge scores hole by hole rather than blowing away local state
-        if (cloudData.scores) {
-          setScores(prevScores => {
-            const merged = { ...prevScores };
-            Object.keys(cloudData.scores).forEach(holeNum => {
-              merged[holeNum] = {
-                ...(prevScores[holeNum] || {}),
-                ...(cloudData.scores[holeNum] || {})
-              };
-            });
-            return merged;
-          });
-        }
-
-        // Only update metadata if incoming is valid
-        if (cloudData.courseName && timeSinceLocalEdit >= 4000) {
-          setCourseName(cloudData.courseName);
-          setRoundDate(cloudData.roundDate || new Date().toISOString().split('T')[0]);
-          setHolesCount(cloudData.holesCount || cloudData.holes?.length || 18);
-          if (cloudData.holes) setHoles(cloudData.holes);
-          if (cloudData.players) setPlayers(cloudData.players);
-          if (cloudData.teams) setTeams(cloudData.teams);
-          if (cloudData.activeGame) setActiveGame(cloudData.activeGame);
-          if (cloudData.pointsWager) setPointsWager(cloudData.pointsWager);
-        }
-
-        setLastCloudSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-      }, [accessMode]);
-
-      // FETCH FROM CLOUD
-      const fetchFromCloud = useCallback(async (urlToUse, tripToUse) => {
-        if (!urlToUse) return false;
-        try {
-          setIsSyncing(true);
-          const endpoint = `${urlToUse}${urlToUse.includes('?') ? '&' : '?'}trip=${encodeURIComponent(tripToUse || 'DEFAULT_TRIP')}&t=${Date.now()}`;
-          const res = await fetch(endpoint);
-          const cloudData = await res.json();
-          mergeCloudState(cloudData);
-          return true;
-        } catch (err) {
-          console.warn("Cloud poll skipped (offline or network pause)");
-        } finally {
-          setIsSyncing(false);
-        }
-        return false;
-      }, [mergeCloudState]);
-
-      // QUEUED PUSH TO CLOUD (Never allows concurrent requests to collide)
-      const pushToCloud = useCallback(async () => {
-        if (!sheetsWebhookUrl || accessMode === 'ro') return;
-
-        if (isPushingRef.current) {
-          pendingPushRef.current = true;
-          return;
-        }
-
-        isPushingRef.current = true;
-        setIsSyncing(true);
-
-        try {
-          const payload = {
-            tripId,
-            timestamp: new Date().toISOString(),
-            lastModified: localLastModifiedRef.current,
-            courseName,
-            roundDate,
-            activeGame,
-            pointsWager,
-            holesCount,
-            players,
-            teams,
-            scores,
-            holes: holes.slice(0, holesCount),
-            savedCourses,
-            savedRoster
-          };
-
-          await fetch(sheetsWebhookUrl, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-
-          setLastCloudSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        } catch (err) {
-          console.warn("Cloud push error", err);
-        } finally {
-          isPushingRef.current = false;
-          setIsSyncing(false);
-
-          // If changes were made while push was in flight, push again immediately
-          if (pendingPushRef.current) {
-            pendingPushRef.current = false;
-            pushToCloud();
-          }
-        }
-      }, [sheetsWebhookUrl, accessMode, tripId, courseName, roundDate, activeGame, pointsWager, holesCount, players, teams, scores, holes, savedCourses, savedRoster]);
-
-      // INITIAL HYDRATION ON MOUNT
-      useEffect(() => {
-        async function init() {
-          try {
-            let urlTrip = null;
-            let urlApi = null;
-            let urlMode = 'rw';
-
-            if (window.location.hash) {
-              const hashClean = window.location.hash.replace(/^#/, '');
-              const params = new URLSearchParams(hashClean);
-              if (params.get('mode') === 'readonly' || params.get('mode') === 'ro') urlMode = 'ro';
-              if (params.get('trip')) urlTrip = params.get('trip');
-              if (params.get('api')) urlApi = decodeURIComponent(params.get('api'));
-            }
-
-            setAccessMode(urlMode);
-
-            const [cachedTripId, cachedSheetUrl, cachedCourses, cachedRoster, cachedRound] = await Promise.all([
-              localforage.getItem(DB_KEY_TRIP_ID),
-              localforage.getItem(DB_KEY_SHEET_URL),
-              localforage.getItem(DB_KEY_COURSES),
-              localforage.getItem(DB_KEY_ROSTER),
-              localforage.getItem(DB_KEY_ROUND)
-            ]);
-
-            const finalTripId = urlTrip || cachedTripId || 'GolfTrip2026';
-            const finalSheetUrl = urlApi || cachedSheetUrl || '';
-
-            setTripId(finalTripId);
-            setSheetsWebhookUrl(finalSheetUrl);
-            if (cachedCourses) setSavedCourses(cachedCourses);
-            if (cachedRoster) setSavedRoster(cachedRoster);
-
-            if (cachedRound) {
-              if (cachedRound.courseName) setCourseName(cachedRound.courseName);
-              if (cachedRound.roundDate) setRoundDate(cachedRound.roundDate);
-              if (cachedRound.holesCount) setHolesCount(cachedRound.holesCount);
-              if (cachedRound.holes) setHoles(cachedRound.holes);
-              if (cachedRound.players) setPlayers(cachedRound.players);
-              if (cachedRound.teams) setTeams(cachedRound.teams);
-              if (cachedRound.activeGame) setActiveGame(cachedRound.activeGame);
-              if (cachedRound.pointsWager) setPointsWager(cachedRound.pointsWager);
-              if (cachedRound.scores) setScores(cachedRound.scores);
-              if (cachedRound.currentHole) setCurrentHole(cachedRound.currentHole);
-            }
-
-            // Pull fresh cloud data
-            if (finalSheetUrl) {
-              await fetchFromCloud(finalSheetUrl, finalTripId);
-            }
-
-            // Strip state param so reload won't re-trigger snapshot
-            if (window.location.hash.includes('state=')) {
-              history.replaceState(null, '', window.location.pathname + (urlMode === 'ro' ? '#mode=readonly' : ''));
-            }
-
-          } catch (e) {
-            console.error("Init failed", e);
-          } finally {
-            setIsReady(true);
-          }
-        }
-
-        init();
-      }, [fetchFromCloud]);
-
-      // BACKGROUND POLLING (Every 12s in Spectator Mode, 25s in Scorer Mode)
-      useEffect(() => {
-        if (!sheetsWebhookUrl || !isReady) return;
-        const pollRate = accessMode === 'ro' ? 12000 : 25000;
-        const interval = setInterval(() => {
-          fetchFromCloud(sheetsWebhookUrl, tripId);
-        }, pollRate);
-        return () => clearInterval(interval);
-      }, [sheetsWebhookUrl, tripId, isReady, accessMode, fetchFromCloud]);
-
-      // AUTO-SAVE TO LOCAL DATABASE & CLOUD
-      useEffect(() => {
-        if (!isReady || accessMode === 'ro') return;
-
-        const roundSnapshot = {
-          tripId,
-          courseName,
-          roundDate,
-          holesCount,
-          holes,
-          players,
-          teams,
-          activeGame,
-          pointsWager,
-          scores,
-          currentHole,
-          sheetsWebhookUrl
-        };
-
-        localforage.setItem(DB_KEY_ROUND, roundSnapshot);
-        localforage.setItem(DB_KEY_TRIP_ID, tripId);
-        localforage.setItem(DB_KEY_SHEET_URL, sheetsWebhookUrl);
-        localforage.setItem(DB_KEY_COURSES, savedCourses);
-        localforage.setItem(DB_KEY_ROSTER, savedRoster);
-
-        // Debounce cloud push to prevent spamming
-        const cloudTimer = setTimeout(() => {
-          pushToCloud();
-        }, 1200);
-
-        return () => clearTimeout(cloudTimer);
-      }, [isReady, accessMode, tripId, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl, savedCourses, savedRoster, pushToCloud]);
-
-      // Mobile Flush Handler
-      useEffect(() => {
-        const handleFlush = () => {
-          if (accessMode === 'rw' && sheetsWebhookUrl) {
-            pushToCloud();
-          }
-        };
-        window.addEventListener('pagehide', handleFlush);
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'hidden') handleFlush();
-        });
-        return () => {
-          window.removeEventListener('pagehide', handleFlush);
-        };
-      }, [accessMode, sheetsWebhookUrl, pushToCloud]);
-
-      // OPTIMISTIC ZERO-LAG SCORE HANDLER
-      const handleSetScore = (holeNum, playerId, scoreValue) => {
-        if (accessMode === 'ro') {
-          showToast('Spectator mode: Scoring locked');
-          return;
-        }
-
-        // Set local lock timestamp so incoming cloud sync won't clobber this score
-        localLastModifiedRef.current = Date.now();
-
-        const val = scoreValue === null || scoreValue === undefined ? null : Number(scoreValue);
-        setScores(prev => ({
-          ...prev,
-          [holeNum]: { ...(prev[holeNum] || {}), [playerId]: val }
-        }));
-      };
-
-      const advanceToNext = () => {
-        const playerIdx = players.findIndex(p => p.id === selectedPlayerId);
-        if (playerIdx < players.length - 1) {
-          setSelectedPlayerId(players[playerIdx + 1].id);
-        } else {
-          if (currentHole < holesCount) {
-            setCurrentHole(prev => prev + 1);
-            setSelectedPlayerId(players[0].id);
-          }
-        }
-      };
-
-      // SHARE UNIVERSAL CLOUD LINK
-      const handleGenerateUniversalLink = (targetMode) => {
-        const modeParam = targetMode === 'ro' ? 'mode=readonly' : 'mode=scorer';
-        const tripParam = `trip=${encodeURIComponent(tripId)}`;
-        const apiParam = sheetsWebhookUrl ? `&api=${encodeURIComponent(sheetsWebhookUrl)}` : '';
-        const universalUrl = `${window.location.origin}${window.location.pathname}#${modeParam}&${tripParam}${apiParam}`;
-
-        const temp = document.createElement('input');
-        temp.value = universalUrl;
-        document.body.appendChild(temp);
-        temp.select();
-        document.execCommand('copy');
-        document.body.removeChild(temp);
-        showToast(targetMode === 'ro' ? 'Viewer Link copied!' : 'Scorer Link copied!');
-      };
-
-      // COURSE LIBRARY ACTIONS
-      const handleSaveCurrentCourseToLibrary = () => {
-        localLastModifiedRef.current = Date.now();
-        const courseId = `c_${Date.now()}`;
-        const newEntry = {
-          id: courseId,
-          name: courseName.trim() || 'Custom Course',
-          holesCount: Number(holesCount),
-          holes: JSON.parse(JSON.stringify(holes.slice(0, holesCount)))
-        };
-
-        const updated = [newEntry, ...savedCourses.filter(c => c.name.toLowerCase() !== newEntry.name.toLowerCase())];
-        setSavedCourses(updated);
-        showToast(`Saved "${newEntry.name}"!`);
-      };
-
-      const handleLoadCourseFromLibrary = (courseObj) => {
-        if (accessMode === 'ro') return;
-        localLastModifiedRef.current = Date.now();
-        setCourseName(courseObj.name);
-        setHolesCount(courseObj.holesCount);
-        setHoles(JSON.parse(JSON.stringify(courseObj.holes)));
-        
-        const newScores = {};
-        for (let i = 1; i <= courseObj.holesCount; i++) {
-          newScores[i] = {};
-          players.forEach(p => { newScores[i][p.id] = null; });
-        }
-        setScores(newScores);
-        setCurrentHole(1);
-        showToast(`Loaded "${courseObj.name}"!`);
-      };
-
-      const handleDeleteCourseFromLibrary = (id, name) => {
-        if (confirm(`Delete "${name}" from library?`)) {
-          localLastModifiedRef.current = Date.now();
-          setSavedCourses(prev => prev.filter(c => c.id !== id));
-          showToast(`Deleted "${name}"`);
-        }
-      };
-
-      // GOLFER ROSTER ACTIONS
-      const handleSaveCurrentPlayersToRoster = () => {
-        localLastModifiedRef.current = Date.now();
-        const rosterMap = new Map(savedRoster.map(p => [p.name.toLowerCase(), p]));
-        players.forEach(p => {
-          rosterMap.set(p.name.toLowerCase(), {
-            id: p.id.startsWith('sp') ? p.id : `sp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-            name: p.name.trim(),
-            hcp: Number(p.hcp) || 0,
-            color: p.color
-          });
-        });
-        setSavedRoster(Array.from(rosterMap.values()));
-        showToast('Roster saved permanently!');
-      };
-
-      const handleAddPlayerFromSavedRoster = (savedPlayer) => {
-        localLastModifiedRef.current = Date.now();
-        if (players.some(p => p.name.toLowerCase() === savedPlayer.name.toLowerCase())) {
-          showToast(`${savedPlayer.name} is already in the round`);
-          return;
-        }
-        const newPlayerInstance = {
-          id: `p_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-          name: savedPlayer.name,
-          hcp: Number(savedPlayer.hcp) || 0,
-          team: players.length % 2 === 0 ? 'A' : 'B',
-          color: savedPlayer.color || COLOR_PALETTE[players.length % COLOR_PALETTE.length]
-        };
-        setPlayers(prev => [...prev, newPlayerInstance]);
-        showToast(`Added ${savedPlayer.name}`);
-      };
-
-      const handleDeletePlayerFromRoster = (id, name) => {
-        setSavedRoster(prev => prev.filter(p => p.id !== id));
-        showToast(`Removed ${name}`);
-      };
-
-      const getPlayerHoleStrokes = (playerHcp, holeHcpIndex) => {
+      // Robust USGA Handicap Stroke Calculator (Supports 0 to 54 HCP)
+      function getStrokesGiven(playerHcp, holeHcpIndex, totalHoles) {
         if (!playerHcp || playerHcp <= 0) return 0;
-        const baseStrokes = Math.floor(playerHcp / holesCount);
-        const remainder = playerHcp % holesCount;
-        return baseStrokes + (holeHcpIndex <= remainder ? 1 : 0);
-      };
+        const count = totalHoles || 18;
+        const base = Math.floor(playerHcp / count);
+        const remainder = playerHcp % count;
+        return base + (holeHcpIndex <= remainder ? 1 : 0);
+      }
 
-      const currentHoleData = useMemo(() => {
-        return holes.find(h => h.num === currentHole) || { num: currentHole, par: 4, hcp: 1, yardage: 400 };
-      }, [holes, currentHole]);
+      function App() {
+        const [isReady, setIsReady] = useState(false);
+        const [accessMode, setAccessMode] = useState('rw');
+        const [activeTab, setActiveTab] = useState('live');
+        const [toastMessage, setToastMessage] = useState('');
+        const [isOnline, setIsOnline] = useState(navigator.onLine);
+        const [lastCloudSync, setLastCloudSync] = useState(null);
 
-      const handleAddBlankPlayer = () => {
-        if (accessMode === 'ro') return;
-        localLastModifiedRef.current = Date.now();
-        const newId = `p_${Date.now()}`;
-        const color = COLOR_PALETTE[players.length % COLOR_PALETTE.length];
-        setPlayers(prev => [
-          ...prev,
-          { id: newId, name: `Player ${prev.length + 1}`, hcp: 10, team: prev.length % 2 === 0 ? 'A' : 'B', color }
-        ]);
-        showToast('Added golfer slot');
-      };
+        // Core Cloud Hub Keys
+        const [tripId, setTripId] = useState('GolfTrip2026');
+        const [sheetsUrl, setSheetsUrl] = useState('');
+        const [isSyncing, setIsSyncing] = useState(false);
 
-      const handleDeleteActivePlayer = (id) => {
-        if (accessMode === 'ro') return;
-        if (players.length <= 1) {
-          showToast('Must keep at least 1 player');
-          return;
-        }
-        localLastModifiedRef.current = Date.now();
-        setPlayers(prev => prev.filter(p => p.id !== id));
-      };
+        // Libraries
+        const [savedCourses, setSavedCourses] = useState(DEFAULT_COURSES);
+        const [savedRoster, setSavedRoster] = useState(DEFAULT_PLAYERS);
 
-      const handleUpdatePlayer = (id, field, value) => {
-        if (accessMode === 'ro') return;
-        localLastModifiedRef.current = Date.now();
-        setPlayers(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
-      };
+        // Active Tournament State
+        const [courseName, setCourseName] = useState('Pinehurst No. 2');
+        const [roundDate, setRoundDate] = useState(new Date().toISOString().split('T')[0]);
+        const [holesCount, setHolesCount] = useState(18);
+        const [holes, setHoles] = useState(DEFAULT_COURSES[0].holes);
+        const [players, setPlayers] = useState(DEFAULT_PLAYERS);
+        const [teams, setTeams] = useState([{ id: 'A', name: 'Team Eagles' }, { id: 'B', name: 'Team Birdies' }]);
+        const [activeGame, setActiveGame] = useState('best_ball');
+        const [pointsWager, setPointsWager] = useState(10);
 
-      const handleUpdateHole = (holeNum, field, val) => {
-        if (accessMode === 'ro') return;
-        localLastModifiedRef.current = Date.now();
-        setHoles(prev => prev.map(h => h.num === holeNum ? { ...h, [field]: Number(val) || val } : h));
-      };
+        // Cell-Level LWW Score Matrix: scores[hole][playerId] = { val: number, ts: timestamp }
+        const [scores, setScores] = useState({});
 
-      const handleManualReset = () => {
-        if (confirm("Reset active scores? (Courses and saved roster will NOT be deleted)")) {
-          localLastModifiedRef.current = Date.now();
-          const freshScores = {};
-          for (let i = 1; i <= holesCount; i++) freshScores[i] = {};
-          setScores(freshScores);
-          setCurrentHole(1);
-          showToast('Active round reset!');
-        }
-      };
+        // UI Nav State
+        const [currentHole, setCurrentHole] = useState(1);
+        const [selectedPlayerId, setSelectedPlayerId] = useState('p1');
+        const [showOtherModal, setShowOtherModal] = useState(false);
+        const [manualScoreInput, setManualScoreInput] = useState('');
+        const [showRosterModal, setShowRosterModal] = useState(false);
 
-      // Player Metrics Calculations
-      const playerStats = useMemo(() => {
-        return players.map(player => {
-          let totalGross = 0, totalNet = 0, totalPar = 0, holesPlayed = 0, stablefordPoints = 0, skinsWon = 0;
-          
-          holes.slice(0, holesCount).forEach(h => {
-            const gross = scores[h.num]?.[player.id];
-            if (gross !== null && gross !== undefined && gross > 0) {
-              holesPlayed++;
-              totalGross += Number(gross);
-              totalPar += h.par;
-              const strokes = getPlayerHoleStrokes(player.hcp, h.hcp);
-              const net = Number(gross) - strokes;
-              totalNet += net;
+        // Mutex & Batching Refs
+        const pendingPushRef = useRef(false);
+        const isPushingRef = useRef(false);
+        const lastLocalEditRef = useRef(0);
 
-              const netDiff = net - h.par;
-              if (netDiff <= -3) stablefordPoints += 5;
-              else if (netDiff === -2) stablefordPoints += 4;
-              else if (netDiff === -1) stablefordPoints += 3;
-              else if (netDiff === 0) stablefordPoints += 2;
-              else if (netDiff === 1) stablefordPoints += 1;
+        const showToast = useCallback((msg) => {
+          setToastMessage(msg);
+          setTimeout(() => setToastMessage(''), 2500);
+        }, []);
+
+        // Haptic feedback trigger
+        const triggerHaptic = useCallback(() => {
+          if (navigator.vibrate) navigator.vibrate(12);
+        }, []);
+
+        // Offline Network Listeners
+        useEffect(() => {
+          const onOnline = () => {
+            setIsOnline(true);
+            showToast('Back online! Syncing scores...');
+            pushToCloud();
+          };
+          const onOffline = () => {
+            setIsOnline(false);
+            showToast('Offline: Scores will save to device cache.');
+          };
+          window.addEventListener('online', onOnline);
+          window.addEventListener('offline', onOffline);
+          return () => {
+            window.removeEventListener('online', onOnline);
+            window.removeEventListener('offline', onOffline);
+          };
+        }, []);
+
+        // Granular Cell-Level LWW Merge Algorithm
+        const mergeIncomingCloudData = useCallback((cloudPayload) => {
+          if (!cloudPayload || !cloudPayload.courseName) return;
+
+          // Merge scores cell-by-cell preserving whichever cell has the newest timestamp
+          if (cloudPayload.scores) {
+            setScores(prevScores => {
+              const next = { ...prevScores };
+              Object.keys(cloudPayload.scores).forEach(hNum => {
+                next[hNum] = next[hNum] || {};
+                const cloudHole = cloudPayload.scores[hNum] || {};
+                Object.keys(cloudHole).forEach(pId => {
+                  const cloudCell = cloudHole[pId];
+                  const localCell = next[hNum][pId];
+
+                  // Handle legacy numeric values vs new {val, ts} structures
+                  const cloudVal = typeof cloudCell === 'object' && cloudCell !== null ? cloudCell.val : cloudCell;
+                  const cloudTs = typeof cloudCell === 'object' && cloudCell !== null ? (cloudCell.ts || 0) : 0;
+                  const localTs = typeof localCell === 'object' && localCell !== null ? (localCell.ts || 0) : 0;
+
+                  if (cloudTs >= localTs || !localCell) {
+                    next[hNum][pId] = { val: cloudVal, ts: cloudTs };
+                  }
+                });
+              });
+              return next;
+            });
+          }
+
+          // Merge Course/Players metadata only if no local edit happened in the last 4 seconds
+          if (Date.now() - lastLocalEditRef.current > 4000) {
+            if (cloudPayload.courseName) setCourseName(cloudPayload.courseName);
+            if (cloudPayload.roundDate) setRoundDate(cloudPayload.roundDate);
+            if (cloudPayload.holesCount) setHolesCount(cloudPayload.holesCount);
+            if (cloudPayload.holes) setHoles(cloudPayload.holes);
+            if (cloudPayload.players) setPlayers(cloudPayload.players);
+            if (cloudPayload.teams) setTeams(cloudPayload.teams);
+            if (cloudPayload.activeGame) setActiveGame(cloudPayload.activeGame);
+            if (cloudPayload.pointsWager) setPointsWager(cloudPayload.pointsWager);
+          }
+
+          setLastCloudSync(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        }, []);
+
+        // Cloud Polling Engine
+        const pullFromCloud = useCallback(async (targetUrl, targetTrip) => {
+          const url = targetUrl || sheetsUrl;
+          const trip = targetTrip || tripId;
+          if (!url || !navigator.onLine) return;
+
+          try {
+            setIsSyncing(true);
+            const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}trip=${encodeURIComponent(trip)}&t=${Date.now()}`);
+            const data = await res.json();
+            mergeIncomingCloudData(data);
+          } catch (err) {
+            // Silently handled for offline fallback
+          } finally {
+            setIsSyncing(false);
+          }
+        }, [sheetsUrl, tripId, mergeIncomingCloudData]);
+
+        // Cloud Push Queue Engine
+        const pushToCloud = useCallback(async () => {
+          if (!sheetsUrl || accessMode === 'ro' || !navigator.onLine) return;
+
+          if (isPushingRef.current) {
+            pendingPushRef.current = true;
+            return;
+          }
+
+          isPushingRef.current = true;
+          setIsSyncing(true);
+
+          try {
+            const payload = {
+              tripId,
+              timestamp: new Date().toISOString(),
+              courseName,
+              roundDate,
+              activeGame,
+              pointsWager,
+              holesCount,
+              players,
+              teams,
+              scores,
+              holes: holes.slice(0, holesCount),
+              savedCourses,
+              savedRoster
+            };
+
+            await fetch(sheetsUrl, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+
+            setLastCloudSync(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          } catch (err) {
+            console.warn('Cloud upload deferred (offline)');
+          } finally {
+            isPushingRef.current = false;
+            setIsSyncing(false);
+
+            if (pendingPushRef.current) {
+              pendingPushRef.current = false;
+              pushToCloud();
             }
+          }
+        }, [sheetsUrl, accessMode, tripId, courseName, roundDate, activeGame, pointsWager, holesCount, players, teams, scores, holes, savedCourses, savedRoster]);
+
+        // Initial App Mount & IndexedDB Hydration
+        useEffect(() => {
+          async function initApp() {
+            try {
+              let urlTrip = null;
+              let urlApi = null;
+              let urlMode = 'rw';
+
+              if (window.location.hash) {
+                const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+                if (params.get('mode') === 'readonly' || params.get('mode') === 'ro') urlMode = 'ro';
+                if (params.get('trip')) urlTrip = params.get('trip');
+                if (params.get('api')) urlApi = decodeURIComponent(params.get('api'));
+              }
+
+              setAccessMode(urlMode);
+
+              const [cTrip, cUrl, cCourses, cRoster, cRound] = await Promise.all([
+                localforage.getItem(DB_KEY_TRIP),
+                localforage.getItem(DB_KEY_SHEET_URL),
+                localforage.getItem(DB_KEY_COURSES),
+                localforage.getItem(DB_KEY_ROSTER),
+                localforage.getItem(DB_KEY_ROUND)
+              ]);
+
+              const finalTrip = urlTrip || cTrip || 'GolfTrip2026';
+              const finalApi = urlApi || cUrl || '';
+
+              setTripId(finalTrip);
+              setSheetsUrl(finalApi);
+              if (cCourses) setSavedCourses(cCourses);
+              if (cRoster) setSavedRoster(cRoster);
+
+              if (cRound) {
+                if (cRound.courseName) setCourseName(cRound.courseName);
+                if (cRound.roundDate) setRoundDate(cRound.roundDate);
+                if (cRound.holesCount) setHolesCount(cRound.holesCount);
+                if (cRound.holes) setHoles(cRound.holes);
+                if (cRound.players) setPlayers(cRound.players);
+                if (cRound.teams) setTeams(cRound.teams);
+                if (cRound.activeGame) setActiveGame(cRound.activeGame);
+                if (cRound.pointsWager) setPointsWager(cRound.pointsWager);
+                if (cRound.scores) setScores(cRound.scores);
+              }
+
+              if (finalApi) {
+                pullFromCloud(finalApi, finalTrip);
+              }
+
+              if (window.location.hash.includes('state=')) {
+                history.replaceState(null, '', window.location.pathname + (urlMode === 'ro' ? '#mode=readonly' : ''));
+              }
+            } catch (e) {
+              console.error('Init error', e);
+            } finally {
+              setIsReady(true);
+            }
+          }
+
+          initApp();
+        }, []);
+
+        // Background Polling (12s for Spectator, 30s for Scorer)
+        useEffect(() => {
+          if (!sheetsUrl || !isReady) return;
+          const intervalMs = accessMode === 'ro' ? 12000 : 30000;
+          const timer = setInterval(() => {
+            pullFromCloud(sheetsUrl, tripId);
+          }, intervalMs);
+          return () => clearInterval(timer);
+        }, [sheetsUrl, tripId, isReady, accessMode, pullFromCloud]);
+
+        // Auto-Persistence to IndexedDB & Debounced Cloud Sync
+        useEffect(() => {
+          if (!isReady || accessMode === 'ro') return;
+
+          localforage.setItem(DB_KEY_ROUND, {
+            tripId, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores
           });
+          localforage.setItem(DB_KEY_TRIP, tripId);
+          localforage.setItem(DB_KEY_SHEET_URL, sheetsUrl);
+          localforage.setItem(DB_KEY_COURSES, savedCourses);
+          localforage.setItem(DB_KEY_ROSTER, savedRoster);
 
-          holes.slice(0, holesCount).forEach(h => {
-            const allHoleScores = players.map(p => {
-              const raw = scores[h.num]?.[p.id];
-              return raw ? raw - getPlayerHoleStrokes(p.hcp, h.hcp) : null;
-            }).filter(s => s !== null);
+          const debounceTimer = setTimeout(() => {
+            pushToCloud();
+          }, 1200);
 
-            if (allHoleScores.length === players.length && players.length > 0) {
-              const myRaw = scores[h.num]?.[player.id];
-              if (myRaw) {
-                const myNet = myRaw - getPlayerHoleStrokes(player.hcp, h.hcp);
-                const minNet = Math.min(...allHoleScores);
-                if (myNet === minNet && allHoleScores.filter(s => s === minNet).length === 1) {
-                  skinsWon++;
+          return () => clearTimeout(debounceTimer);
+        }, [isReady, accessMode, tripId, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, sheetsUrl, savedCourses, savedRoster, pushToCloud]);
+
+        // Helper to retrieve raw score number from cell object
+        const getRawScore = useCallback((holeNum, playerId) => {
+          const cell = scores[holeNum]?.[playerId];
+          if (cell === null || cell === undefined) return null;
+          return typeof cell === 'object' ? cell.val : cell;
+        }, [scores]);
+
+        // Optimistic Score Input Action
+        const handleSetScore = useCallback((holeNum, playerId, scoreValue) => {
+          if (accessMode === 'ro') {
+            showToast('Spectator Mode: Scoring is locked');
+            return;
+          }
+
+          triggerHaptic();
+          lastLocalEditRef.current = Date.now();
+          const val = (scoreValue === null || scoreValue === undefined || scoreValue === '') ? null : Number(scoreValue);
+
+          setScores(prev => ({
+            ...prev,
+            [holeNum]: {
+              ...(prev[holeNum] || {}),
+              [playerId]: { val, ts: Date.now() }
+            }
+          }));
+        }, [accessMode, triggerHaptic, showToast]);
+
+        const advanceToNext = useCallback(() => {
+          const pIdx = players.findIndex(p => p.id === selectedPlayerId);
+          if (pIdx < players.length - 1) {
+            setSelectedPlayerId(players[pIdx + 1].id);
+          } else {
+            if (currentHole < holesCount) {
+              setCurrentHole(prev => prev + 1);
+              setSelectedPlayerId(players[0].id);
+            }
+          }
+        }, [players, selectedPlayerId, currentHole, holesCount]);
+
+        // Dynamic Player Stats Engine
+        const playerStats = useMemo(() => {
+          return players.map(player => {
+            let totalGross = 0, totalNet = 0, totalPar = 0, holesPlayed = 0, stablefordPoints = 0, skinsWon = 0;
+
+            holes.slice(0, holesCount).forEach(h => {
+              const gross = getRawScore(h.num, player.id);
+              if (gross !== null && gross > 0) {
+                holesPlayed++;
+                totalGross += Number(gross);
+                totalPar += h.par;
+                const strokes = getStrokesGiven(player.hcp, h.hcp, holesCount);
+                const net = Number(gross) - strokes;
+                totalNet += net;
+
+                const netDiff = net - h.par;
+                if (netDiff <= -3) stablefordPoints += 5;
+                else if (netDiff === -2) stablefordPoints += 4;
+                else if (netDiff === -1) stablefordPoints += 3;
+                else if (netDiff === 0) stablefordPoints += 2;
+                else if (netDiff === 1) stablefordPoints += 1;
+              }
+            });
+
+            // Calculate skins
+            holes.slice(0, holesCount).forEach(h => {
+              const validHoleNets = players.map(p => {
+                const raw = getRawScore(h.num, p.id);
+                return raw ? (raw - getStrokesGiven(p.hcp, h.hcp, holesCount)) : null;
+              }).filter(s => s !== null);
+
+              if (validHoleNets.length === players.length && players.length > 0) {
+                const myGross = getRawScore(h.num, player.id);
+                if (myGross) {
+                  const myNet = myGross - getStrokesGiven(player.hcp, h.hcp, holesCount);
+                  const min = Math.min(...validHoleNets);
+                  if (myNet === min && validHoleNets.filter(v => v === min).length === 1) {
+                    skinsWon++;
+                  }
                 }
               }
+            });
+
+            const scoreToPar = totalGross - totalPar;
+            const netToPar = totalNet - totalPar;
+            const quotaTarget = Math.max(1, 36 - player.hcp);
+            const quotaDiff = stablefordPoints - (holesPlayed / holesCount * quotaTarget);
+
+            return {
+              ...player,
+              holesPlayed,
+              totalGross,
+              totalNet,
+              scoreToPar: holesPlayed > 0 ? (scoreToPar > 0 ? `+${scoreToPar}` : scoreToPar === 0 ? 'E' : `${scoreToPar}`) : '-',
+              netToPar: holesPlayed > 0 ? (netToPar > 0 ? `+${netToPar}` : netToPar === 0 ? 'E' : `${netToPar}`) : '-',
+              rawNetToPar: netToPar,
+              stablefordPoints,
+              quotaDiff: quotaDiff >= 0 ? `+${quotaDiff.toFixed(1)}` : quotaDiff.toFixed(1),
+              rawQuotaDiff: quotaDiff,
+              skinsWon
+            };
+          });
+        }, [players, holes, holesCount, getRawScore]);
+
+        // Team & Multi-Format Game Engine
+        const gameEngine = useMemo(() => {
+          const tA = playerStats.filter(p => p.team === 'A');
+          const tB = playerStats.filter(p => p.team === 'B');
+
+          let teamANet = 0, teamBNet = 0, teamAHoles = 0, teamBHoles = 0;
+          holes.slice(0, holesCount).forEach(h => {
+            const aNets = tA.map(p => {
+              const raw = getRawScore(h.num, p.id);
+              return raw ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
+            }).filter(s => s !== null);
+
+            const bNets = tB.map(p => {
+              const raw = getRawScore(h.num, p.id);
+              return raw ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
+            }).filter(s => s !== null);
+
+            if (aNets.length > 0) { teamANet += Math.min(...aNets); teamAHoles++; }
+            if (bNets.length > 0) { teamBNet += Math.min(...bNets); teamBHoles++; }
+          });
+
+          // Vegas
+          let vegasTeamA = 0, vegasTeamB = 0;
+          holes.slice(0, holesCount).forEach(h => {
+            const sA1 = getRawScore(h.num, tA[0]?.id);
+            const sA2 = getRawScore(h.num, tA[1]?.id);
+            const sB1 = getRawScore(h.num, tB[0]?.id);
+            const sB2 = getRawScore(h.num, tB[1]?.id);
+
+            if (sA1 && sA2 && sB1 && sB2) {
+              let aLow = Math.min(sA1, sA2), aHigh = Math.max(sA1, sA2);
+              let bLow = Math.min(sB1, sB2), bHigh = Math.max(sB1, sB2);
+              let valA = parseInt(`${aLow}${aHigh}`, 10);
+              let valB = parseInt(`${bLow}${bHigh}`, 10);
+
+              if (aLow < h.par && bLow >= h.par) valB = parseInt(`${bHigh}${bLow}`, 10);
+              else if (bLow < h.par && aLow >= h.par) valA = parseInt(`${aHigh}${aLow}`, 10);
+
+              const diff = valB - valA;
+              if (diff > 0) vegasTeamA += diff;
+              else if (diff < 0) vegasTeamB += Math.abs(diff);
             }
           });
 
-          const scoreToPar = totalGross - totalPar;
-          const netToPar = totalNet - totalPar;
-          const quotaTarget = Math.max(1, 36 - player.hcp);
-          const quotaDiff = stablefordPoints - (holesPlayed / holesCount * quotaTarget);
+          // Skins carryover
+          const skinsList = [];
+          let carryover = 0;
+          holes.slice(0, holesCount).forEach(h => {
+            const holeScores = players.map(p => {
+              const raw = getRawScore(h.num, p.id);
+              return raw ? { player: p, net: raw - getStrokesGiven(p.hcp, h.hcp, holesCount) } : null;
+            }).filter(Boolean);
+
+            let winner = null;
+            let skinValue = 1 + carryover;
+            if (holeScores.length === players.length && players.length > 0) {
+              const min = Math.min(...holeScores.map(s => s.net));
+              const winners = holeScores.filter(s => s.net === min);
+              if (winners.length === 1) {
+                winner = winners[0].player;
+                carryover = 0;
+              } else {
+                carryover += 1;
+              }
+            }
+            skinsList.push({ hole: h.num, par: h.par, skinValue, winner, carryover });
+          });
 
           return {
-            ...player,
-            holesPlayed,
-            totalGross,
-            totalNet,
-            scoreToPar: holesPlayed > 0 ? (scoreToPar > 0 ? `+${scoreToPar}` : scoreToPar === 0 ? 'E' : `${scoreToPar}`) : '-',
-            netToPar: holesPlayed > 0 ? (netToPar > 0 ? `+${netToPar}` : netToPar === 0 ? 'E' : `${netToPar}`) : '-',
-            rawScoreToPar: scoreToPar,
-            rawNetToPar: netToPar,
-            stablefordPoints,
-            quotaTarget,
-            quotaDiff: (quotaDiff >= 0 ? `+${quotaDiff.toFixed(1)}` : quotaDiff.toFixed(1)),
-            rawQuotaDiff: quotaDiff,
-            skinsWon
+            bestBall: { teamANet, teamBNet, teamAHoles, teamBHoles },
+            vegas: { vegasTeamA, vegasTeamB, diff: vegasTeamA - vegasTeamB },
+            skins: { skinsList, currentCarryover: skinsList[skinsList.length - 1]?.carryover || 0 }
           };
-        });
-      }, [players, holes, holesCount, scores]);
+        }, [playerStats, holes, holesCount, getRawScore, players]);
 
-      // Game Engine Calculations
-      const gameEngine = useMemo(() => {
-        const teamA = playerStats.filter(p => p.team === 'A');
-        const teamB = playerStats.filter(p => p.team === 'B');
+        // Official Score Glyphs
+        const renderScoreBadge = useCallback((gross, par) => {
+          if (!gross) return h('span', { className: 'text-gray-500 font-mono text-[11px]' }, '-');
+          const diff = Number(gross) - par;
+          if (diff <= -2) return h('span', { className: 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-200 text-amber-950 border-2 border-amber-500 ring-1 ring-amber-400 font-black text-[11px] leading-none shadow-sm' }, gross);
+          if (diff === -1) return h('span', { className: 'inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-200 text-emerald-950 border-2 border-emerald-600 font-black text-[11px] leading-none shadow-sm' }, gross);
+          if (diff === 0) return h('span', { className: 'inline-flex items-center justify-center w-6 h-6 text-gray-100 font-bold text-[11px] leading-none' }, gross);
+          if (diff === 1) return h('span', { className: 'inline-flex items-center justify-center w-5 h-5 bg-orange-200 text-orange-950 border border-orange-500 font-black text-[11px] leading-none' }, gross);
+          return h('span', { className: 'inline-flex items-center justify-center w-5 h-5 bg-red-200 text-red-950 border border-red-600 ring-1 ring-red-400 font-black text-[11px] leading-none' }, gross);
+        }, []);
 
-        let teamANet = 0, teamBNet = 0, teamAGross = 0, teamBGross = 0, teamAHoles = 0, teamBHoles = 0;
-        holes.slice(0, holesCount).forEach(h => {
-          const sANet = teamA.map(p => scores[h.num]?.[p.id] ? scores[h.num][p.id] - getPlayerHoleStrokes(p.hcp, h.hcp) : null).filter(s => s !== null);
-          const sBNet = teamB.map(p => scores[h.num]?.[p.id] ? scores[h.num][p.id] - getPlayerHoleStrokes(p.hcp, h.hcp) : null).filter(s => s !== null);
-          const sAGross = teamA.map(p => scores[h.num]?.[p.id]).filter(s => s !== null);
-          const sBGross = teamB.map(p => scores[h.num]?.[p.id]).filter(s => s !== null);
+        // Share Link Generator
+        const handleGenerateLink = (targetMode) => {
+          const modeParam = targetMode === 'ro' ? 'mode=readonly' : 'mode=scorer';
+          const tripParam = `trip=${encodeURIComponent(tripId)}`;
+          const apiParam = sheetsUrl ? `&api=${encodeURIComponent(sheetsUrl)}` : '';
+          const url = `${window.location.origin}${window.location.pathname}#${modeParam}&${tripParam}${apiParam}`;
 
-          if (sANet.length > 0) { teamANet += Math.min(...sANet); teamAHoles++; }
-          if (sBNet.length > 0) { teamBNet += Math.min(...sBNet); teamBHoles++; }
-          if (sAGross.length > 0) teamAGross += Math.min(...sAGross);
-          if (sBGross.length > 0) teamBGross += Math.min(...sBGross);
-        });
-
-        let vegasTeamA = 0, vegasTeamB = 0;
-        holes.slice(0, holesCount).forEach(h => {
-          const sA1 = scores[h.num]?.[teamA[0]?.id];
-          const sA2 = scores[h.num]?.[teamA[1]?.id];
-          const sB1 = scores[h.num]?.[teamB[0]?.id];
-          const sB2 = scores[h.num]?.[teamB[1]?.id];
-
-          if (sA1 && sA2 && sB1 && sB2) {
-            let aLow = Math.min(sA1, sA2), aHigh = Math.max(sA1, sA2);
-            let bLow = Math.min(sB1, sB2), bHigh = Math.max(sB1, sB2);
-            let valA = parseInt(`${aLow}${aHigh}`, 10);
-            let valB = parseInt(`${bLow}${bHigh}`, 10);
-
-            if (aLow < h.par && bLow >= h.par) valB = parseInt(`${bHigh}${bLow}`, 10);
-            else if (bLow < h.par && aLow >= h.par) valA = parseInt(`${aHigh}${aLow}`, 10);
-
-            const diff = valB - valA;
-            if (diff > 0) vegasTeamA += diff;
-            else if (diff < 0) vegasTeamB += Math.abs(diff);
-          }
-        });
-
-        const skinsData = [];
-        let carryover = 0;
-        holes.slice(0, holesCount).forEach(h => {
-          const holeScores = players.map(p => {
-            const raw = scores[h.num]?.[p.id];
-            return raw ? { player: p, net: raw - getPlayerHoleStrokes(p.hcp, h.hcp) } : null;
-          }).filter(Boolean);
-
-          let winner = null;
-          let skinValue = 1 + carryover;
-          if (holeScores.length === players.length && players.length > 0) {
-            const minNet = Math.min(...holeScores.map(s => s.net));
-            const winners = holeScores.filter(s => s.net === minNet);
-            if (winners.length === 1) {
-              winner = winners[0].player;
-              carryover = 0;
-            } else {
-              carryover += 1;
-            }
-          }
-          skinsData.push({ hole: h.num, par: h.par, skinValue, winner, carryover: winner ? 0 : carryover });
-        });
-
-        return {
-          bestBall: { teamANet, teamBNet, teamAGross, teamBGross, teamAHoles, teamBHoles },
-          vegas: { vegasTeamA, vegasTeamB, diff: vegasTeamA - vegasTeamB },
-          skins: { skinsData, currentCarryover: skinsData[skinsData.length - 1]?.carryover || 0 }
+          const temp = document.createElement('input');
+          temp.value = url;
+          document.body.appendChild(temp);
+          temp.select();
+          document.execCommand('copy');
+          document.body.removeChild(temp);
+          showToast(targetMode === 'ro' ? 'Viewer Link Copied!' : 'Scorer Link Copied!');
         };
-      }, [players, playerStats, holes, holesCount, scores]);
 
-      const getScoreBadge = (gross, par) => {
-        if (!gross) return <span className="text-gray-500 font-mono text-[11px]">-</span>;
-        const diff = Number(gross) - par;
-        if (diff <= -2) return <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-200 text-amber-950 border-2 border-amber-500 ring-1 ring-amber-400 font-black text-[11px] leading-none">{gross}</span>;
-        if (diff === -1) return <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-200 text-emerald-950 border-2 border-emerald-600 font-black text-[11px] leading-none">{gross}</span>;
-        if (diff === 0) return <span className="inline-flex items-center justify-center w-6 h-6 text-gray-100 font-bold text-[11px] leading-none">{gross}</span>;
-        if (diff === 1) return <span className="inline-flex items-center justify-center w-5 h-5 bg-orange-200 text-orange-950 border border-orange-500 font-black text-[11px] leading-none">{gross}</span>;
-        return <span className="inline-flex items-center justify-center w-5 h-5 bg-red-200 text-red-950 border border-red-600 ring-1 ring-red-400 font-black text-[11px] leading-none">{gross}</span>;
-      };
+        const currentHoleData = holes.find(h => h.num === currentHole) || { num: currentHole, par: 4, hcp: 1, yardage: 400 };
+        const activePlayer = players.find(p => p.id === selectedPlayerId) || players[0];
+        const activePlayerRaw = getRawScore(currentHole, activePlayer?.id);
+        const activePlayerStrokes = activePlayer ? getStrokesGiven(activePlayer.hcp, currentHoleData.hcp, holesCount) : 0;
+        const isHigherThanTriple = activePlayerRaw && activePlayerRaw > currentHoleData.par + 3;
 
-      const handleExportCSV = () => {
-        let csv = `Trip ID: ${tripId}, Course: ${courseName}, Date: ${roundDate}, Holes: ${holesCount}, Game: ${activeGame}\n\n`;
-        csv += `Hole,${holes.slice(0, holesCount).map(h => h.num).join(',')},Total Gross,Total Net,To Par,Stableford,Quota +/-\n`;
-        csv += `Par,${holes.slice(0, holesCount).map(h => h.par).join(',')},${holes.slice(0, holesCount).reduce((a,b)=>a+b.par,0)},,,,\n`;
-        csv += `HCP,${holes.slice(0, holesCount).map(h => h.hcp).join(',')},,,,,\n`;
+        // Dynamic Scorecard Columns
+        const dynamicColHeader = activeGame === 'stableford' ? 'STB PTS' : activeGame === 'quota' ? 'QUOTA' : activeGame === 'skins' ? 'SKINS' : 'NET';
 
-        playerStats.forEach(p => {
-          const rowScores = holes.slice(0, holesCount).map(h => scores[h.num]?.[p.id] || '').join(',');
-          csv += `${p.name} (HCP ${p.hcp} | Team ${p.team}),${rowScores},${p.totalGross},${p.totalNet},${p.scoreToPar},${p.stablefordPoints},${p.quotaDiff}\n`;
-        });
-
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${tripId}_${courseName.replace(/\s+/g, '_')}_${roundDate}.csv`;
-        a.click();
-        showToast('CSV downloaded!');
-      };
-
-      const quickScoreButtons = useMemo(() => {
-        const par = currentHoleData.par;
-        return [
-          { label: '🦅 Eagle', diffLabel: `-2 (${par - 2})`, score: par - 2, bg: 'bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white' },
-          { label: '🐦 Birdie', diffLabel: `-1 (${par - 1})`, score: par - 1, bg: 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white' },
-          { label: '⛳ Par', diffLabel: `E (${par})`, score: par, bg: 'bg-slate-700 hover:bg-slate-800 active:bg-slate-900 text-white' },
-          { label: '🟧 Bogey', diffLabel: `+1 (${par + 1})`, score: par + 1, bg: 'bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white' },
-          { label: '🟥 Double', diffLabel: `+2 (${par + 2})`, score: par + 2, bg: 'bg-red-500 hover:bg-red-600 active:bg-red-700 text-white' },
-          { label: '🟥 Triple', diffLabel: `+3 (${par + 3})`, score: par + 3, bg: 'bg-red-700 hover:bg-red-800 active:bg-red-900 text-white' }
-        ];
-      }, [currentHoleData]);
-
-      const activePlayer = players.find(p => p.id === selectedPlayerId) || players[0];
-      const activePlayerHoleScore = scores[currentHole]?.[activePlayer?.id];
-      const activePlayerStrokes = activePlayer ? getPlayerHoleStrokes(activePlayer.hcp, currentHoleData.hcp) : 0;
-      const isHigherThanTriple = activePlayerHoleScore && activePlayerHoleScore > currentHoleData.par + 3;
-
-      const scorecardColumns = useMemo(() => {
-        switch (activeGame) {
-          case 'stableford':
-            return {
-              col1Header: 'GROSS',
-              col2Header: 'STB PTS',
-              renderCol1: (stats) => stats.totalGross || '-',
-              renderCol2: (stats) => <span className="text-amber-400 font-black">{stats.stablefordPoints} pts</span>
-            };
-          case 'quota':
-            return {
-              col1Header: 'STB PTS',
-              col2Header: 'QUOTA',
-              renderCol1: (stats) => `${stats.stablefordPoints}p`,
-              renderCol2: (stats) => <span className={`font-black ${stats.rawQuotaDiff >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{stats.quotaDiff}</span>
-            };
-          case 'skins':
-            return {
-              col1Header: 'NET',
-              col2Header: 'SKINS',
-              renderCol1: (stats) => stats.totalNet || '-',
-              renderCol2: (stats) => <span className="text-purple-300 font-black">🏆 {stats.skinsWon}</span>
-            };
-          default:
-            return {
-              col1Header: 'GROSS',
-              col2Header: 'NET',
-              renderCol1: (stats) => stats.totalGross || '-',
-              renderCol2: (stats) => <span className="text-emerald-400 font-bold">{stats.totalNet || '-'}</span>
-            };
-        }
-      }, [activeGame]);
-
-      return (
-        <div className="flex flex-col h-[100dvh] w-full max-w-lg mx-auto bg-slate-950 text-slate-100 overflow-hidden select-none">
+        return h('div', { className: 'flex flex-col h-[100dvh] w-full max-w-lg mx-auto bg-slate-950 text-slate-100 overflow-hidden select-none' },
           
-          {/* Top Global Bar */}
-          <header className="safe-top flex items-center justify-between px-3 py-1.5 bg-slate-900 border-b border-slate-800 shrink-0 z-20">
-            <div className="flex items-center space-x-2">
-              <div className="w-7 h-7 rounded-lg bg-emerald-600 flex items-center justify-center font-black text-sm text-white shadow">⛳</div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <h1 className="text-xs sm:text-sm font-black text-white truncate max-w-[120px]">{courseName}</h1>
-                  <span className={`text-[9px] px-1 py-0.5 rounded font-bold uppercase ${accessMode === 'ro' ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                    {accessMode === 'ro' ? 'Viewer' : 'Scorer'}
-                  </span>
-                </div>
+          // Header Bar
+          h('header', { className: 'safe-top flex items-center justify-between px-3 py-1.5 bg-slate-900 border-b border-slate-800 shrink-0 z-20' },
+            h('div', { className: 'flex items-center space-x-2' },
+              h('div', { className: 'w-7 h-7 rounded-lg bg-emerald-600 flex items-center justify-center font-black text-sm text-white shadow' }, '⛳'),
+              h('div', null,
+                h('div', { className: 'flex items-center gap-1.5' },
+                  h('h1', { className: 'text-xs sm:text-sm font-black text-white truncate max-w-[120px]' }, courseName),
+                  h('span', { className: `text-[9px] px-1 py-0.5 rounded font-bold uppercase ${accessMode === 'ro' ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}` }, accessMode === 'ro' ? 'Viewer' : 'Scorer'),
+                  !isOnline && h('span', { className: 'text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-400 font-bold uppercase' }, 'Offline')
+                ),
+                accessMode === 'rw'
+                  ? h('select', {
+                      value: activeGame,
+                      onChange: (e) => {
+                        lastLocalEditRef.current = Date.now();
+                        setActiveGame(e.target.value);
+                        showToast(`Game: ${GAME_TYPES.find(g => g.id === e.target.value)?.name}`);
+                      },
+                      className: 'bg-transparent text-[11px] text-emerald-400 font-bold border-none outline-none cursor-pointer p-0 m-0'
+                    }, GAME_TYPES.map(g => h('option', { key: g.id, value: g.id, className: 'bg-slate-900 text-white' }, g.name)))
+                  : h('p', { className: 'text-[10px] text-emerald-400 font-bold truncate max-w-[150px]' }, GAME_TYPES.find(g => g.id === activeGame)?.name)
+              )
+            ),
+            h('div', { className: 'flex items-center space-x-1' },
+              accessMode === 'rw'
+                ? h('button', { onClick: () => handleGenerateLink('ro'), className: 'px-2 py-1 rounded-md bg-blue-900/60 text-blue-200 text-[11px] font-semibold border border-blue-700/60 active:scale-95 transition' }, 'Share')
+                : h('button', { onClick: () => setAccessMode('rw'), className: 'px-2 py-1 rounded-md bg-slate-800 text-slate-200 text-[11px] font-semibold border border-slate-700 active:scale-95 transition' }, 'Unlock'),
+              h('button', { onClick: () => pullFromCloud(), disabled: isSyncing, className: `p-1 rounded-md bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 border border-emerald-700/60 text-xs active:scale-95 transition ${isSyncing ? 'animate-spin' : ''}`, title: 'Sync with Cloud' }, '🔄')
+            )
+          ),
+
+          // Toast Message Banner
+          toastMessage && h('div', { className: 'fixed top-12 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-slate-950 font-black text-xs px-3.5 py-1.5 rounded-full shadow-2xl animate-bounce' }, toastMessage),
+
+          // High Score Modal (+4 or more)
+          showOtherModal && h('div', { className: 'fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4' },
+            h('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 w-full max-w-xs space-y-3 shadow-2xl' },
+              h('div', { className: 'flex items-center justify-between' },
+                h('div', null,
+                  h('h3', { className: 'text-xs sm:text-sm font-black text-white' }, 'Score (+4 or Higher)'),
+                  h('p', { className: 'text-[11px] text-slate-400' }, `${activePlayer?.name} • Hole ${currentHole} (Par ${currentHoleData.par})`)
+                ),
+                h('button', { onClick: () => setShowOtherModal(false), className: 'text-slate-400 hover:text-white font-bold p-1' }, '✕')
+              ),
+              h('div', { className: 'grid grid-cols-4 gap-1.5' },
+                [currentHoleData.par + 4, currentHoleData.par + 5, currentHoleData.par + 6, currentHoleData.par + 7].map(val =>
+                  h('button', {
+                    key: val,
+                    onClick: () => {
+                      handleSetScore(currentHole, selectedPlayerId, val);
+                      setShowOtherModal(false);
+                      advanceToNext();
+                    },
+                    className: 'py-2 bg-red-950/80 hover:bg-red-900 border border-red-800 rounded-lg text-xs font-black text-red-200 active:scale-95 transition'
+                  }, `+${val - currentHoleData.par} (${val})`)
+                )
+              ),
+              h('div', { className: 'flex gap-2 pt-1 border-t border-slate-800' },
+                h('input', {
+                  type: 'number',
+                  placeholder: 'Total Strokes',
+                  value: manualScoreInput,
+                  onChange: (e) => setManualScoreInput(e.target.value),
+                  className: 'flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-center text-white font-bold text-sm outline-none focus:border-emerald-500'
+                }),
+                h('button', {
+                  onClick: () => {
+                    if (manualScoreInput) {
+                      handleSetScore(currentHole, selectedPlayerId, manualScoreInput);
+                      setShowOtherModal(false);
+                      advanceToNext();
+                    }
+                  },
+                  className: 'px-3.5 py-1.5 bg-emerald-600 active:bg-emerald-700 font-black text-xs text-slate-950 rounded-lg'
+                }, 'Save')
+              )
+            )
+          ),
+
+          // Main View Layout
+          h('main', { className: 'flex-1 flex flex-col min-h-0 overflow-hidden relative' },
+            activeTab === 'live' && h('div', { className: 'flex-1 flex flex-col min-h-0 overflow-hidden' },
+              
+              // Top Half: Visual Scorecard
+              h('div', { className: 'flex-1 min-h-[140px] max-h-[48%] flex flex-col bg-slate-900/40 border-b border-slate-800/80 overflow-hidden' },
                 
-                {accessMode === 'rw' ? (
-                  <select 
-                    value={activeGame} 
-                    onChange={(e) => {
-                      localLastModifiedRef.current = Date.now();
-                      setActiveGame(e.target.value);
-                      showToast(`Game: ${GAME_TYPES.find(g => g.id === e.target.value)?.name}`);
-                    }}
-                    className="bg-transparent text-[11px] text-emerald-400 font-bold border-none outline-none cursor-pointer p-0 m-0"
-                  >
-                    {GAME_TYPES.map(g => (
-                      <option key={g.id} value={g.id} className="bg-slate-900 text-white">{g.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <p className="text-[10px] text-emerald-400 font-bold truncate max-w-[150px]">{GAME_TYPES.find(g => g.id === activeGame)?.name}</p>
-                )}
-              </div>
-            </div>
+                // Dynamic Metrics Pill Banner
+                h('div', { className: 'px-2 py-1 bg-slate-900 border-b border-slate-800/80 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0' },
+                  h('div', { className: 'flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0' },
+                    h('span', null, `${teams[0]?.name}:`),
+                    h('span', { className: 'font-mono text-white bg-slate-900 px-1 rounded' }, `${gameEngine.bestBall.teamANet || 'E'} Net`)
+                  ),
+                  h('div', { className: 'flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0' },
+                    h('span', null, `${teams[1]?.name}:`),
+                    h('span', { className: 'font-mono text-white bg-slate-900 px-1 rounded' }, `${gameEngine.bestBall.teamBNet || 'E'} Net`)
+                  ),
+                  activeGame === 'vegas' && h('div', { className: 'flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-950/40 border border-purple-500/40 text-[11px] shrink-0 text-purple-300' },
+                    h('span', null, 'Diff:'),
+                    h('span', { className: 'font-bold text-white font-mono' }, `${Math.abs(gameEngine.vegas.diff)} pts`)
+                  ),
+                  activeGame === 'skins' && h('div', { className: 'flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-purple-500/40 bg-purple-950/40 text-purple-300 text-[11px] font-bold shrink-0' },
+                    h('span', null, 'Carryover:'),
+                    h('span', { className: 'font-mono text-white bg-slate-900 px-1 rounded' }, `${gameEngine.skins.currentCarryover} Skins`)
+                  )
+                ),
 
-            <div className="flex items-center space-x-1">
-              {accessMode === 'rw' ? (
-                <button onClick={() => handleGenerateUniversalLink('ro')} className="px-2 py-1 rounded-md bg-blue-900/60 text-blue-200 text-[11px] font-semibold border border-blue-700/60 active:scale-95 transition">
-                  Share
-                </button>
-              ) : (
-                <button onClick={() => setAccessMode('rw')} className="px-2 py-1 rounded-md bg-slate-800 text-slate-200 text-[11px] font-semibold border border-slate-700 active:scale-95 transition">
-                  Unlock
-                </button>
-              )}
-              <button onClick={() => fetchFromCloud(sheetsWebhookUrl, tripId)} disabled={isSyncing} className={`p-1 rounded-md bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 border border-emerald-700/60 text-xs active:scale-95 transition ${isSyncing ? 'animate-spin' : ''}`} title="Sync with Cloud">
-                🔄
-              </button>
-              <button onClick={handleExportCSV} className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs active:scale-95 transition" title="Export CSV">
-                📥
-              </button>
-            </div>
-          </header>
+                // Physical Scorecard Grid
+                h('div', { className: 'flex-1 overflow-auto p-1.5' },
+                  h('table', { className: 'min-w-full text-center border-collapse text-[11px]' },
+                    h('thead', null,
+                      h('tr', { className: 'bg-slate-900 text-slate-300 font-semibold border-b border-slate-800' },
+                        h('th', { className: 'sticky left-0 bg-slate-900 px-1.5 py-1 text-left w-20 z-10' }, 'HOLE'),
+                        holes.slice(0, holesCount).map(hItem =>
+                          h('th', {
+                            key: hItem.num,
+                            onClick: () => setCurrentHole(hItem.num),
+                            className: `px-1.5 py-0.5 font-mono cursor-pointer ${currentHole === hItem.num ? 'bg-emerald-600 text-white font-bold' : 'text-slate-300'}`
+                          }, hItem.num)
+                        ),
+                        h('th', { className: 'px-1.5 py-0.5 bg-slate-800 font-bold' }, 'TOT'),
+                        h('th', { className: 'px-1.5 py-0.5 bg-slate-800 font-bold' }, dynamicColHeader)
+                      ),
+                      h('tr', { className: 'bg-slate-900/90 text-[10px] text-slate-400 border-b border-slate-800 font-mono' },
+                        h('td', { className: 'sticky left-0 bg-slate-900 px-1.5 py-0.5 text-left font-bold z-10' }, 'PAR'),
+                        holes.slice(0, holesCount).map(hItem =>
+                          h('td', { key: hItem.num, className: `py-0.5 ${currentHole === hItem.num ? 'bg-emerald-950 text-emerald-400 font-bold' : ''}` }, hItem.par)
+                        ),
+                        h('td', null, holes.slice(0, holesCount).reduce((a, b) => a + b.par, 0)),
+                        h('td', null, '-')
+                      )
+                    ),
+                    h('tbody', { className: 'divide-y divide-slate-800/80' },
+                      players.map(player => {
+                        const stats = playerStats.find(p => p.id === player.id);
+                        return h('tr', {
+                          key: player.id,
+                          onClick: () => setSelectedPlayerId(player.id),
+                          className: `cursor-pointer ${selectedPlayerId === player.id ? 'bg-slate-800/60 font-semibold' : ''}`
+                        },
+                          h('td', { className: 'sticky left-0 bg-slate-900 px-1.5 py-1 text-left border-r border-slate-800 z-10' },
+                            h('div', { className: 'flex items-center gap-1' },
+                              h('span', { className: 'w-2 h-2 rounded-full shrink-0', style: { backgroundColor: player.color } }),
+                              h('span', { className: 'font-bold text-[11px] text-white truncate max-w-[65px]' }, player.name)
+                            )
+                          ),
+                          holes.slice(0, holesCount).map(hItem => {
+                            const raw = getRawScore(hItem.num, player.id);
+                            const dots = getStrokesGiven(player.hcp, hItem.hcp, holesCount);
+                            return h('td', {
+                              key: hItem.num,
+                              onClick: () => { setCurrentHole(hItem.num); setSelectedPlayerId(player.id); },
+                              className: `p-0.5 relative ${currentHole === hItem.num && selectedPlayerId === player.id ? 'ring-1.5 ring-emerald-400 bg-emerald-950/40 rounded' : ''}`
+                            },
+                              renderScoreBadge(raw, hItem.par),
+                              dots > 0 && h('div', { className: 'absolute top-0.5 right-0.5 text-[7px] leading-none text-emerald-400 font-black' }, '•'.repeat(dots))
+                            );
+                          }),
+                          h('td', { className: 'px-1.5 py-0.5 font-mono font-bold text-white bg-slate-900/40' }, stats?.totalGross || '-'),
+                          h('td', { className: 'px-1.5 py-0.5 font-mono font-bold text-emerald-400 bg-slate-900/40' },
+                            activeGame === 'stableford' ? stats?.stablefordPoints : activeGame === 'quota' ? stats?.quotaDiff : activeGame === 'skins' ? `🏆 ${stats?.skinsWon}` : (stats?.totalNet || '-')
+                          )
+                        );
+                      })
+                    )
+                  )
+                )
+              ),
 
-          {/* Toast Notification */}
-          {toastMessage && (
-            <div className="fixed top-12 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-slate-950 font-black text-xs px-3.5 py-1.5 rounded-full shadow-2xl animate-bounce">
-              {toastMessage}
-            </div>
-          )}
+              // Bottom Half: Thumb-Friendly Keypad
+              accessMode === 'rw'
+                ? h('div', { className: 'flex-1 flex flex-col justify-between p-2 gap-1.5 overflow-hidden' },
+                    // Hole Navigator
+                    h('div', { className: 'flex items-center justify-between bg-slate-900/90 rounded-xl px-2 py-1 border border-slate-800 shrink-0 shadow-sm' },
+                      h('button', { onClick: () => setCurrentHole(prev => Math.max(1, prev - 1)), disabled: currentHole === 1, className: 'px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 font-bold text-xs disabled:opacity-20 transition' }, '◀'),
+                      h('div', { className: 'flex items-center gap-1.5' },
+                        h('span', { className: 'text-xs font-black uppercase text-emerald-400 tracking-wider' }, `Hole ${currentHole}`),
+                        h('span', { className: 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-mono font-bold' }, `Par ${currentHoleData.par}`),
+                        h('span', { className: 'text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono' }, `${currentHoleData.yardage}y`),
+                        activePlayerStrokes > 0 && h('span', { className: 'text-[10px] text-slate-400 font-medium' }, `(${activePlayerStrokes} dot)`)
+                      ),
+                      h('button', { onClick: () => setCurrentHole(prev => Math.min(holesCount, prev + 1)), disabled: currentHole === holesCount, className: 'px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 font-bold text-xs disabled:opacity-20 transition' }, '▶')
+                    ),
 
-          {/* 4+ Score Modal */}
-          {showOtherModal && (
-            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 w-full max-w-xs space-y-3 shadow-2xl">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs sm:text-sm font-black text-white">Score (+4 or Higher)</h3>
-                    <p className="text-[11px] text-slate-400">{activePlayer?.name} • Hole {currentHole} (Par {currentHoleData.par})</p>
-                  </div>
-                  <button onClick={() => setShowOtherModal(false)} className="text-slate-400 hover:text-white font-bold p-1">✕</button>
-                </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {[currentHoleData.par+4, currentHoleData.par+5, currentHoleData.par+6, currentHoleData.par+7].map(val => (
-                    <button key={val} onClick={() => { handleSetScore(currentHole, selectedPlayerId, val); setShowOtherModal(false); advanceToNext(); }} className="py-2 bg-red-950/80 hover:bg-red-900 border border-red-800 rounded-lg text-xs font-black text-red-200 active:scale-95 transition">
-                      +{val - currentHoleData.par} ({val})
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2 pt-1 border-t border-slate-800">
-                  <input type="number" placeholder="Total Strokes" value={manualScoreInput} onChange={e => setManualScoreInput(e.target.value)} className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-center text-white font-bold text-sm outline-none focus:border-emerald-500" />
-                  <button onClick={() => { if(manualScoreInput) { handleSetScore(currentHole, selectedPlayerId, manualScoreInput); setShowOtherModal(false); advanceToNext(); }}} className="px-3.5 py-1.5 bg-emerald-600 active:bg-emerald-700 font-black text-xs text-slate-950 rounded-lg">Save</button>
-                </div>
-              </div>
-            </div>
-          )}
+                    // Player Chips
+                    h('div', { className: 'flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 shrink-0' },
+                      players.map(p => {
+                        const raw = getRawScore(currentHole, p.id);
+                        return h('button', {
+                          key: p.id,
+                          onClick: () => setSelectedPlayerId(p.id),
+                          className: `flex-1 min-w-[105px] py-1.5 px-2 rounded-xl flex items-center justify-between border transition active:scale-95 ${p.id === selectedPlayerId ? 'bg-slate-800 border-emerald-500 ring-1.5 ring-emerald-500/80 shadow' : 'bg-slate-900/90 border-slate-800 opacity-70'}`
+                        },
+                          h('div', { className: 'flex items-center gap-1.5 truncate' },
+                            h('span', { className: 'w-2.5 h-2.5 rounded-full shrink-0', style: { backgroundColor: p.color } }),
+                            h('span', { className: 'text-[11px] font-black text-white truncate' }, p.name)
+                          ),
+                          h('span', { className: 'text-[11px] font-mono font-black px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950' }, raw || '-')
+                        );
+                      })
+                    ),
 
-          {/* Golfer Rolodex Modal */}
-          {showRosterPickerModal && (
-            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 w-full max-w-xs space-y-3 shadow-2xl">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs sm:text-sm font-black text-white">Add From Saved Roster</h3>
-                    <p className="text-[11px] text-slate-400">Tap a golfer to add them to today's round</p>
-                  </div>
-                  <button onClick={() => setShowRosterPickerModal(false)} className="text-slate-400 hover:text-white font-bold p-1">✕</button>
-                </div>
+                    // Quick Score Buttons
+                    h('div', { className: 'grid grid-cols-3 gap-1.5 flex-1 min-h-[90px]' },
+                      [
+                        { label: '🦅 Eagle', diff: `-2 (${currentHoleData.par - 2})`, val: currentHoleData.par - 2, bg: 'bg-amber-500 hover:bg-amber-600' },
+                        { label: '🐦 Birdie', diff: `-1 (${currentHoleData.par - 1})`, val: currentHoleData.par - 1, bg: 'bg-emerald-600 hover:bg-emerald-700' },
+                        { label: '⛳ Par', diff: `E (${currentHoleData.par})`, val: currentHoleData.par, bg: 'bg-slate-700 hover:bg-slate-800' },
+                        { label: '🟧 Bogey', diff: `+1 (${currentHoleData.par + 1})`, val: currentHoleData.par + 1, bg: 'bg-orange-500 hover:bg-orange-600' },
+                        { label: '🟥 Double', diff: `+2 (${currentHoleData.par + 2})`, val: currentHoleData.par + 2, bg: 'bg-red-500 hover:bg-red-600' },
+                        { label: '🟥 Triple', diff: `+3 (${currentHoleData.par + 3})`, val: currentHoleData.par + 3, bg: 'bg-red-700 hover:bg-red-800' }
+                      ].map(btn =>
+                        h('button', {
+                          key: btn.label,
+                          onClick: () => { handleSetScore(currentHole, selectedPlayerId, btn.val); advanceToNext(); },
+                          className: `py-2 px-1 rounded-xl font-bold text-xs sm:text-sm flex flex-col items-center justify-center shadow active:scale-95 transition text-white ${btn.bg}`
+                        },
+                          h('span', { className: 'font-black leading-tight text-xs sm:text-sm' }, btn.label),
+                          h('span', { className: 'text-[9px] opacity-90 uppercase font-semibold mt-0.5' }, btn.diff)
+                        )
+                      )
+                    ),
 
-                <div className="max-h-60 overflow-y-auto space-y-1.5 divide-y divide-slate-800">
-                  {savedRoster.map(sp => (
-                    <div key={sp.id} className="pt-1.5 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: sp.color }} />
-                        <span className="text-xs font-bold text-white">{sp.name}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">HCP {sp.hcp}</span>
-                      </div>
-                      <button 
-                        onClick={() => {
-                          handleAddPlayerFromSavedRoster(sp);
-                          setShowRosterPickerModal(false);
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-[11px] active:scale-95 transition"
-                      >
-                        + Add
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+                    // Utility Controls
+                    h('div', { className: 'grid grid-cols-2 gap-1.5 shrink-0' },
+                      h('button', {
+                        onClick: () => { setManualScoreInput(''); setShowOtherModal(true); },
+                        className: `py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-red-700/80 active:scale-95 transition ${isHigherThanTriple ? 'bg-red-700 text-white ring-1 ring-white' : 'bg-red-950/80 text-red-200 hover:bg-red-900'}`
+                      },
+                        h('span', { className: 'font-black' }, '🟥 +4 / Other'),
+                        h('span', { className: 'text-[10px] font-mono opacity-80' }, isHigherThanTriple ? `(${activePlayerRaw})` : `(${currentHoleData.par + 4}+)`)
+                      ),
+                      h('button', {
+                        onClick: () => handleSetScore(currentHole, selectedPlayerId, null),
+                        className: 'py-2 rounded-xl font-bold text-xs bg-slate-800/90 text-slate-300 border border-slate-700 flex items-center justify-center gap-1 active:scale-95 transition hover:bg-slate-700'
+                      }, 'Clear Score')
+                    )
+                  )
+                : h('div', { className: 'flex-1 flex flex-col justify-center items-center text-center p-4 space-y-2' },
+                    h('div', { className: 'p-3 bg-blue-950/40 border border-blue-500/30 rounded-xl max-w-xs' },
+                      h('h3', { className: 'text-xs font-black text-white' }, 'Live Spectator Mode'),
+                      h('p', { className: 'text-[11px] text-blue-300' }, `Connected to Trip Cloud: ${tripId}`)
+                    ),
+                    h('button', { onClick: () => setAccessMode('rw'), className: 'px-5 py-2 rounded-xl bg-emerald-600 font-bold text-slate-950 text-xs shadow active:scale-95 transition' }, 'Unlock Scoring')
+                  )
+            ),
 
-          {/* Main App Body */}
-          <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+            // TAB 2: TOURNAMENT GAMES
+            activeTab === 'games' && h('div', { className: 'flex-1 overflow-y-auto p-3 space-y-3' },
+              h('div', { className: 'p-3 rounded-xl bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/30' },
+                h('span', { className: 'text-xs font-black uppercase text-emerald-400 block mb-0.5' }, GAME_TYPES.find(g => g.id === activeGame)?.name),
+                h('p', { className: 'text-[11px] text-slate-300' }, GAME_TYPES.find(g => g.id === activeGame)?.desc)
+              ),
+              h('div', { className: 'grid grid-cols-2 gap-2' },
+                h('div', { className: 'p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center' },
+                  h('span', { className: 'text-[11px] text-slate-400 font-bold block' }, teams[0]?.name),
+                  h('span', { className: 'text-xl font-mono font-black text-emerald-400' }, `${gameEngine.bestBall.teamANet} Net`)
+                ),
+                h('div', { className: 'p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center' },
+                  h('span', { className: 'text-[11px] text-slate-400 font-bold block' }, teams[1]?.name),
+                  h('span', { className: 'text-xl font-mono font-black text-amber-400' }, `${gameEngine.bestBall.teamBNet} Net`)
+                )
+              )
+            ),
 
-            {/* TAB 1: DYNAMIC LIVE SCORING VIEW */}
-            {activeTab === 'live' && (
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-                
-                {/* Visual Scorecard Top Half */}
-                <div className="flex-1 min-h-[140px] max-h-[48%] flex flex-col bg-slate-900/40 border-b border-slate-800/80 overflow-hidden">
-                  
-                  {/* Dynamic Standings Banner */}
-                  <div className="px-2 py-1 bg-slate-900 border-b border-slate-800/80 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-                    {(activeGame === 'best_ball' || activeGame === 'scramble' || activeGame === 'shamble' || activeGame === 'match_play') && (
-                      <>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
-                          <span>{teams[0]?.name}:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.bestBall.teamANet || 'E'} Net</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
-                          <span>{teams[1]?.name}:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.bestBall.teamBNet || 'E'} Net</span>
-                        </div>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700 text-[11px] shrink-0 text-slate-300">
-                          <span>Match:</span>
-                          <span className="font-bold text-emerald-400 font-mono">
-                            {gameEngine.bestBall.teamANet < gameEngine.bestBall.teamBNet ? 'Team A Up' : gameEngine.bestBall.teamBNet < gameEngine.bestBall.teamANet ? 'Team B Up' : 'Tied'}
-                          </span>
-                        </div>
-                      </>
-                    )}
+            // TAB 3: COURSE CONFIG
+            activeTab === 'setup' && h('div', { className: 'flex-1 overflow-y-auto p-3 space-y-3' },
+              h('div', { className: 'flex items-center justify-between' },
+                h('h2', { className: 'text-sm font-black text-white' }, 'Course Configuration'),
+                accessMode === 'rw' && h('button', {
+                  onClick: () => {
+                    const newCourse = { id: `c_${Date.now()}`, name: courseName, holesCount, holes };
+                    setSavedCourses(prev => [newCourse, ...prev]);
+                    showToast('Course saved to library!');
+                  },
+                  className: 'px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs shadow'
+                }, '💾 Save Course')
+              ),
+              h('div', { className: 'grid grid-cols-1 gap-1.5' },
+                savedCourses.map(c => h('div', {
+                  key: c.id,
+                  className: 'p-2 rounded-xl border bg-slate-900 border-slate-800 flex items-center justify-between'
+                },
+                  h('span', { className: 'text-xs font-bold text-white' }, c.name),
+                  h('button', {
+                    onClick: () => {
+                      setCourseName(c.name);
+                      setHolesCount(c.holesCount);
+                      setHoles(c.holes);
+                      showToast(`Loaded ${c.name}`);
+                    },
+                    className: 'px-2 py-1 rounded-md bg-slate-700 text-slate-200 text-xs font-bold'
+                  }, 'Load')
+                ))
+              )
+            ),
 
-                    {activeGame === 'vegas' && (
-                      <>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
-                          <span>Eagles:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.vegas.vegasTeamA} pts</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
-                          <span>Birdies:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.vegas.vegasTeamB} pts</span>
-                        </div>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-950/40 border border-purple-500/40 text-[11px] shrink-0 text-purple-300">
-                          <span>Diff:</span>
-                          <span className="font-bold text-white font-mono">{Math.abs(gameEngine.vegas.diff)} pts</span>
-                        </div>
-                      </>
-                    )}
+            // TAB 4: ROSTER
+            activeTab === 'roster' && h('div', { className: 'flex-1 overflow-y-auto p-3 space-y-3' },
+              h('div', { className: 'flex items-center justify-between' },
+                h('h2', { className: 'text-sm font-black text-white' }, 'Tournament Roster'),
+                accessMode === 'rw' && h('button', {
+                  onClick: () => {
+                    const newP = { id: `p_${Date.now()}`, name: `Player ${players.length + 1}`, hcp: 10, team: players.length % 2 === 0 ? 'A' : 'B', color: COLOR_PALETTE[players.length % COLOR_PALETTE.length] };
+                    setPlayers(prev => [...prev, newP]);
+                  },
+                  className: 'px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs'
+                }, '+ Add Player')
+              ),
+              h('div', { className: 'space-y-2' },
+                players.map(p => h('div', { key: p.id, className: 'p-2.5 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between' },
+                  h('div', { className: 'flex items-center gap-2' },
+                    h('span', { className: 'w-3 h-3 rounded-full', style: { backgroundColor: p.color } }),
+                    h('span', { className: 'text-xs font-bold text-white' }, p.name),
+                    h('span', { className: 'text-[10px] text-slate-400 font-mono' }, `HCP ${p.hcp}`)
+                  ),
+                  h('span', { className: 'text-xs font-bold text-emerald-400' }, `Team ${p.team}`)
+                ))
+              )
+            ),
 
-                    {activeGame === 'skins' && (
-                      <>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-purple-500/40 bg-purple-950/40 text-purple-300 text-[11px] font-bold shrink-0">
-                          <span>Carryover:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.skins.currentCarryover} Skins</span>
-                        </div>
-                      </>
-                    )}
+            // TAB 5: SYNC & CLOUD
+            activeTab === 'sync' && h('div', { className: 'flex-1 overflow-y-auto p-3 space-y-3' },
+              h('div', { className: 'p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2' },
+                h('span', { className: 'text-[11px] font-black uppercase text-emerald-400 tracking-wider block' }, 'Trip Cloud Hub'),
+                h('input', {
+                  type: 'text',
+                  value: tripId,
+                  onChange: (e) => setTripId(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '')),
+                  className: 'w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-white'
+                }),
+                h('input', {
+                  type: 'text',
+                  placeholder: 'Google Apps Script URL',
+                  value: sheetsUrl,
+                  onChange: (e) => setSheetsUrl(e.target.value),
+                  className: 'w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white'
+                }),
+                h('button', {
+                  onClick: () => pushToCloud(),
+                  disabled: isSyncing,
+                  className: 'w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black text-xs text-slate-950 shadow transition'
+                }, isSyncing ? 'Saving to Cloud...' : '☁️ Save to Google Sheets Cloud')
+              ),
+              h('div', { className: 'p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2' },
+                h('button', { onClick: () => handleGenerateLink('ro'), className: 'w-full py-2 rounded-lg bg-blue-600 font-bold text-xs text-white' }, '📱 Copy Viewer Link'),
+                h('button', { onClick: () => handleGenerateLink('rw'), className: 'w-full py-2 rounded-lg bg-emerald-600 font-black text-xs text-slate-950' }, '✏️ Copy Scorer Link')
+              )
+            )
+          ),
 
-                    {activeGame === 'stableford' && (
-                      <>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
-                          <span>Leader:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.name} ({[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.stablefordPoints}p)</span>
-                        </div>
-                      </>
-                    )}
+          // Bottom Nav Bar
+          h('nav', { className: 'safe-bottom bg-slate-900 border-t border-slate-800 flex items-center justify-around px-2 shrink-0 z-30 shadow-lg' },
+            ['live', 'games', 'setup', 'roster', 'sync'].map(tab =>
+              h('button', {
+                key: tab,
+                onClick: () => setActiveTab(tab),
+                className: `flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === tab ? 'text-emerald-400 font-bold' : 'text-slate-400'}`
+              },
+                h('span', { className: 'text-sm' }, tab === 'live' ? '⛳' : tab === 'games' ? '🏆' : tab === 'setup' ? '⚙️' : tab === 'roster' ? '👥' : '🔗'),
+                h('span', { className: 'text-[9px] uppercase tracking-wider' }, tab === 'live' ? 'Round' : tab === 'games' ? 'Games' : tab === 'setup' ? 'Courses' : tab === 'roster' ? 'Players' : 'Sync')
+              )
+            )
+          )
+        );
+      }
 
-                    {activeGame === 'quota' && (
-                      <>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
-                          <span>Quota Leader:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{[...playerStats].sort((a,b) => b.rawQuotaDiff - a.rawQuotaDiff)[0]?.name} ({[...playerStats].sort((a,b) => b.rawQuotaDiff - a.rawQuotaDiff)[0]?.quotaDiff})</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Physical Scorecard Grid */}
-                  <div className="flex-1 overflow-auto p-1.5">
-                    <table className="min-w-full text-center border-collapse text-[11px]">
-                      <thead>
-                        <tr className="bg-slate-900 text-slate-300 font-semibold border-b border-slate-800">
-                          <th className="sticky left-0 bg-slate-900 px-1.5 py-1 text-left w-20 z-10">HOLE</th>
-                          {holes.slice(0, holesCount).map(h => (
-                            <th key={h.num} onClick={() => setCurrentHole(h.num)} className={`px-1.5 py-0.5 font-mono cursor-pointer ${currentHole === h.num ? 'bg-emerald-600 text-white font-bold' : 'text-slate-300'}`}>{h.num}</th>
-                          ))}
-                          <th className="px-1.5 py-0.5 bg-slate-800 font-bold">{scorecardColumns.col1Header}</th>
-                          <th className="px-1.5 py-0.5 bg-slate-800 font-bold">{scorecardColumns.col2Header}</th>
-                        </tr>
-                        <tr className="bg-slate-900/90 text-[10px] text-slate-400 border-b border-slate-800 font-mono">
-                          <td className="sticky left-0 bg-slate-900 px-1.5 py-0.5 text-left font-bold z-10">PAR</td>
-                          {holes.slice(0, holesCount).map(h => (
-                            <td key={h.num} className={`py-0.5 ${currentHole === h.num ? 'bg-emerald-950 text-emerald-400 font-bold' : ''}`}>{h.par}</td>
-                          ))}
-                          <td>{holes.slice(0, holesCount).reduce((a,b)=>a+b.par, 0)}</td>
-                          <td>-</td>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/80">
-                        {players.map(player => {
-                          const stats = playerStats.find(p => p.id === player.id);
-                          return (
-                            <tr key={player.id} onClick={() => setSelectedPlayerId(player.id)} className={`cursor-pointer ${selectedPlayerId === player.id ? 'bg-slate-800/60 font-semibold' : ''}`}>
-                              <td className="sticky left-0 bg-slate-900 px-1.5 py-1 text-left border-r border-slate-800 z-10">
-                                <div className="flex items-center gap-1">
-                                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: player.color }} />
-                                  <span className="font-bold text-[11px] text-white truncate max-w-[65px]">{player.name}</span>
-                                </div>
-                              </td>
-                              {holes.slice(0, holesCount).map(h => {
-                                const dots = getPlayerHoleStrokes(player.hcp, h.hcp);
-                                return (
-                                  <td key={h.num} onClick={() => { setCurrentHole(h.num); setSelectedPlayerId(player.id); }} className={`p-0.5 relative ${currentHole === h.num && selectedPlayerId === player.id ? 'ring-1.5 ring-emerald-400 bg-emerald-950/40 rounded' : ''}`}>
-                                    {getScoreBadge(scores[h.num]?.[player.id], h.par)}
-                                    {dots > 0 && <div className="absolute top-0.5 right-0.5 text-[7px] leading-none text-emerald-400 font-black">{'•'.repeat(dots)}</div>}
-                                  </td>
-                                );
-                              })}
-                              
-                              <td className="px-1.5 py-0.5 font-mono font-bold text-white bg-slate-900/40">
-                                {scorecardColumns.renderCol1(stats)}
-                              </td>
-                              <td className="px-1.5 py-0.5 font-mono font-bold bg-slate-900/40">
-                                {scorecardColumns.renderCol2(stats)}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Bottom Half Scoring Pad */}
-                {accessMode === 'rw' ? (
-                  <div className="flex-1 flex flex-col justify-between p-2 gap-1.5 overflow-hidden">
-                    
-                    {/* Compact Hole Navigator Bar */}
-                    <div className="flex items-center justify-between bg-slate-900/90 rounded-xl px-2 py-1 border border-slate-800 shrink-0 shadow-sm">
-                      <button onClick={() => setCurrentHole(prev => Math.max(1, prev - 1))} disabled={currentHole === 1} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 font-bold text-xs disabled:opacity-20 transition">◀</button>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-black uppercase text-emerald-400 tracking-wider">Hole {currentHole}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-mono font-bold">Par {currentHoleData.par}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">{currentHoleData.yardage}y</span>
-                        <span className="text-[10px] text-slate-400 font-medium">{activePlayerStrokes > 0 ? `(${activePlayerStrokes} dot)` : ''}</span>
-                      </div>
-                      <button onClick={() => setCurrentHole(prev => Math.min(holesCount, prev + 1))} disabled={currentHole === holesCount} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 font-bold text-xs disabled:opacity-20 transition">▶</button>
-                    </div>
-
-                    {/* Player Selector Chips */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 shrink-0">
-                      {players.map(p => (
-                        <button key={p.id} onClick={() => setSelectedPlayerId(p.id)} className={`flex-1 min-w-[105px] py-1.5 px-2 rounded-xl flex items-center justify-between border transition active:scale-95 ${p.id === selectedPlayerId ? 'bg-slate-800 border-emerald-500 ring-1.5 ring-emerald-500/80 shadow' : 'bg-slate-900/90 border-slate-800 opacity-70'}`}>
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-                            <span className="text-[11px] font-black text-white truncate">{p.name}</span>
-                          </div>
-                          <span className="text-[11px] font-mono font-black px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950">{scores[currentHole]?.[p.id] || '-'}</span>
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Quick 6 Scoring Buttons */}
-                    <div className="grid grid-cols-3 gap-1.5 flex-1 min-h-[90px]">
-                      {quickScoreButtons.map(btn => (
-                        <button key={btn.label} onClick={() => { handleSetScore(currentHole, selectedPlayerId, btn.score); advanceToNext(); }} className={`py-2 px-1 rounded-xl font-bold text-xs sm:text-sm flex flex-col items-center justify-center shadow active:scale-95 transition ${btn.bg}`}>
-                          <span className="font-black leading-tight text-xs sm:text-sm">{btn.label}</span>
-                          <span className="text-[9px] opacity-90 uppercase font-semibold mt-0.5">{btn.diffLabel}</span>
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Bottom Utility Controls */}
-                    <div className="grid grid-cols-2 gap-1.5 shrink-0">
-                      <button onClick={() => { setManualScoreInput(''); setShowOtherModal(true); }} className={`py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-red-700/80 active:scale-95 transition ${isHigherThanTriple ? 'bg-red-700 text-white ring-1 ring-white' : 'bg-red-950/80 text-red-200 hover:bg-red-900'}`}>
-                        <span className="font-black">🟥 +4 / Other</span>
-                        <span className="text-[10px] font-mono opacity-80">{isHigherThanTriple ? `(${activePlayerHoleScore})` : `(${currentHoleData.par + 4}+)`}</span>
-                      </button>
-                      <button onClick={() => handleSetScore(currentHole, selectedPlayerId, null)} className="py-2 rounded-xl font-bold text-xs bg-slate-800/90 text-slate-300 border border-slate-700 flex items-center justify-center gap-1 active:scale-95 transition hover:bg-slate-700">
-                        <span>Clear Score</span>
-                      </button>
-                    </div>
-
-                  </div>
-                ) : (
-                  <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-2">
-                    <div className="p-3 bg-blue-950/40 border border-blue-500/30 rounded-xl max-w-xs">
-                      <h3 className="text-xs font-black text-white">Live Spectator Mode</h3>
-                      <p className="text-[11px] text-blue-300">Syncing with Trip Cloud ID: <span className="font-bold text-white">{tripId}</span></p>
-                    </div>
-                    <button onClick={() => setAccessMode('rw')} className="px-5 py-2 rounded-xl bg-emerald-600 font-bold text-slate-950 text-xs shadow active:scale-95 transition">Unlock Scoring</button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB 2: TOURNAMENT GAMES */}
-            {activeTab === 'games' && (
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-black text-white">Tournament Games</h2>
-                  {accessMode === 'rw' ? (
-                    <select value={activeGame} onChange={e => { localLastModifiedRef.current = Date.now(); setActiveGame(e.target.value); }} className="bg-slate-900 border border-slate-700 text-emerald-400 text-xs font-bold rounded-lg px-2 py-1 outline-none">
-                      {GAME_TYPES.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                    </select>
-                  ) : (
-                    <span className="text-xs font-bold text-emerald-400">{GAME_TYPES.find(g=>g.id===activeGame)?.name}</span>
-                  )}
-                </div>
-
-                <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/30">
-                  <span className="text-xs font-black uppercase text-emerald-400 block mb-0.5">{GAME_TYPES.find(g=>g.id===activeGame)?.name}</span>
-                  <p className="text-[11px] text-slate-300">{GAME_TYPES.find(g=>g.id===activeGame)?.desc}</p>
-                </div>
-
-                <div className="space-y-2">
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Team Best Ball Leaderboard</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
-                      <span className="text-[11px] text-slate-400 font-bold block">{teams[0]?.name}</span>
-                      <span className="text-xl font-mono font-black text-emerald-400">{gameEngine.bestBall.teamANet} Net</span>
-                      <span className="text-[9px] text-slate-500 block">{gameEngine.bestBall.teamAHoles} holes counted</span>
-                    </div>
-                    <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
-                      <span className="text-[11px] text-slate-400 font-bold block">{teams[1]?.name}</span>
-                      <span className="text-xl font-mono font-black text-amber-400">{gameEngine.bestBall.teamBNet} Net</span>
-                      <span className="text-[9px] text-slate-500 block">{gameEngine.bestBall.teamBHoles} holes counted</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 3: COURSE SETUP & LIBRARY */}
-            {activeTab === 'setup' && (
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-black text-white">Course Configuration</h2>
-                  {accessMode === 'rw' && (
-                    <button 
-                      onClick={handleSaveCurrentCourseToLibrary}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs shadow active:scale-95 transition"
-                    >
-                      💾 Save Course
-                    </button>
-                  )}
-                </div>
-
-                {/* SAVED COURSES LIBRARY */}
-                <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider">Permanent Course Library</span>
-                    <span className="text-[10px] text-slate-400 font-mono">{savedCourses.length} saved</span>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {savedCourses.map(courseItem => {
-                      const isCurrent = courseItem.name.toLowerCase() === courseName.toLowerCase();
-                      return (
-                        <div key={courseItem.id} className={`p-2 rounded-xl border flex items-center justify-between ${isCurrent ? 'bg-emerald-950/40 border-emerald-500/50' : 'bg-slate-800/80 border-slate-700'}`}>
-                          <div className="truncate mr-2">
-                            <span className="text-xs font-bold text-white block truncate">{courseItem.name}</span>
-                            <span className="text-[10px] text-slate-400 font-mono">{courseItem.holesCount} Holes • Par {courseItem.holes.reduce((a,b)=>a+b.par,0)}</span>
-                          </div>
-                          
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              onClick={() => handleLoadCourseFromLibrary(courseItem)}
-                              disabled={isCurrent}
-                              className={`px-2 py-1 rounded-md text-[10px] font-black uppercase transition ${isCurrent ? 'bg-emerald-600 text-slate-950 font-bold opacity-80' : 'bg-slate-700 hover:bg-slate-600 text-slate-100 active:scale-95'}`}
-                            >
-                              {isCurrent ? 'Active' : 'Load'}
-                            </button>
-                            {savedCourses.length > 1 && (
-                              <button 
-                                onClick={() => handleDeleteCourseFromLibrary(courseItem.id, courseItem.name)}
-                                className="p-1 text-slate-400 hover:text-red-400 transition"
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Course Name</label>
-                    <input type="text" disabled={accessMode === 'ro'} value={courseName} onChange={e => { localLastModifiedRef.current = Date.now(); setCourseName(e.target.value); }} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Round Date</label>
-                    <input type="date" disabled={accessMode === 'ro'} value={roundDate} onChange={e => { localLastModifiedRef.current = Date.now(); setRoundDate(e.target.value); }} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Holes Count</label>
-                    <div className="flex gap-1.5">
-                      <button disabled={accessMode === 'ro'} onClick={() => { localLastModifiedRef.current = Date.now(); setHolesCount(9); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${holesCount === 9 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>9 H</button>
-                      <button disabled={accessMode === 'ro'} onClick={() => { localLastModifiedRef.current = Date.now(); setHolesCount(18); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${holesCount === 18 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>18 H</button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <span className="text-[11px] font-bold text-slate-400 block uppercase">Hole Pars & HCP Ratings</span>
-                  <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                    <table className="w-full text-center text-xs">
-                      <thead className="bg-slate-800 text-slate-400 font-bold">
-                        <tr>
-                          <th className="p-1.5">Hole</th>
-                          <th className="p-1.5">Par</th>
-                          <th className="p-1.5">HCP Index</th>
-                          <th className="p-1.5">Yds</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        {holes.slice(0, holesCount).map(h => (
-                          <tr key={h.num}>
-                            <td className="p-1.5 font-mono font-bold text-white">#{h.num}</td>
-                            <td className="p-1.5">
-                              <select disabled={accessMode === 'ro'} value={h.par} onChange={e => handleUpdateHole(h.num, 'par', e.target.value)} className="bg-slate-800 text-white font-bold rounded px-1.5 py-0.5 outline-none">
-                                <option value={3}>Par 3</option>
-                                <option value={4}>Par 4</option>
-                                <option value={5}>Par 5</option>
-                              </select>
-                            </td>
-                            <td className="p-1.5">
-                              <input type="number" disabled={accessMode === 'ro'} min="1" max="18" value={h.hcp} onChange={e => handleUpdateHole(h.num, 'hcp', e.target.value)} className="w-12 text-center bg-slate-800 rounded px-1 py-0.5 font-mono text-white text-xs" />
-                            </td>
-                            <td className="p-1.5">
-                              <input type="number" disabled={accessMode === 'ro'} value={h.yardage} onChange={e => handleUpdateHole(h.num, 'yardage', e.target.value)} className="w-14 text-center bg-slate-800 rounded px-1 py-0.5 font-mono text-white text-xs" />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 4: PLAYERS & PERMANENT ROSTER */}
-            {activeTab === 'roster' && (
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-sm font-black text-white">Active Round Lineup</h2>
-                    <p className="text-[11px] text-slate-400">{players.length} golfers in today's match</p>
-                  </div>
-                  
-                  {accessMode === 'rw' && (
-                    <div className="flex items-center gap-1.5">
-                      <button 
-                        onClick={() => setShowRosterPickerModal(true)}
-                        className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow active:scale-95 transition"
-                      >
-                        👥 Load Saved
-                      </button>
-                      <button 
-                        onClick={handleAddBlankPlayer} 
-                        className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs shadow active:scale-95 transition"
-                      >
-                        + New
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  {players.map((player) => (
-                    <div key={player.id} className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <input type="color" disabled={accessMode === 'ro'} value={player.color} onChange={e => handleUpdatePlayer(player.id, 'color', e.target.value)} className="w-6 h-6 rounded-full cursor-pointer bg-transparent border-none" />
-                        <input type="text" disabled={accessMode === 'ro'} value={player.name} onChange={e => handleUpdatePlayer(player.id, 'name', e.target.value)} className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs font-bold text-white outline-none" />
-                        {accessMode === 'rw' && (
-                          <button onClick={() => handleDeleteActivePlayer(player.id)} className="p-1 text-red-400 hover:text-red-300">🗑️</button>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between pt-0.5">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-slate-400">HCP:</span>
-                          <input type="number" disabled={accessMode === 'ro'} value={player.hcp} onChange={e => handleUpdatePlayer(player.id, 'hcp', Number(e.target.value))} className="w-12 bg-slate-800 border border-slate-700 rounded-md px-1 py-0.5 text-xs font-mono text-center text-white" />
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-slate-400">Team:</span>
-                          <select disabled={accessMode === 'ro'} value={player.team} onChange={e => handleUpdatePlayer(player.id, 'team', e.target.value)} className="bg-slate-800 border border-slate-700 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-emerald-400 outline-none">
-                            <option value="A">Team A (Eagles)</option>
-                            <option value="B">Team B (Birdies)</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-white block">Save Players to Roster</span>
-                    <span className="text-[10px] text-slate-400">Store current golfers permanently</span>
-                  </div>
-                  <button 
-                    onClick={handleSaveCurrentPlayersToRoster}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-emerald-400 active:scale-95 transition"
-                  >
-                    💾 Save Roster
-                  </button>
-                </div>
-
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider">Permanent Golfer Rolodex ({savedRoster.length})</span>
-                  <div className="divide-y divide-slate-800">
-                    {savedRoster.map(sr => (
-                      <div key={sr.id} className="py-1.5 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sr.color }} />
-                          <span className="font-bold text-white">{sr.name}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">HCP {sr.hcp}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <button 
-                            onClick={() => handleAddPlayerFromSavedRoster(sr)}
-                            className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold hover:bg-emerald-500/30"
-                          >
-                            + Add
-                          </button>
-                          <button 
-                            onClick={() => handleDeletePlayerFromRoster(sr.id, sr.name)}
-                            className="text-slate-500 hover:text-red-400 p-0.5"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 5: CLOUD SYNC & UNIVERSAL SHARING */}
-            {activeTab === 'sync' && (
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-black text-white">Trip Cloud Synchronization</h2>
-                  {lastCloudSyncTime && (
-                    <span className="text-[10px] text-emerald-400 font-mono">Synced: {lastCloudSyncTime}</span>
-                  )}
-                </div>
-
-                {/* TRIP CODE CONFIGURATION */}
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider block">Trip Cloud Room ID</span>
-                  <p className="text-[10px] text-slate-400">All players and windows sharing this Trip ID will stay synced to the exact same round.</p>
-                  
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      value={tripId}
-                      onChange={(e) => setTripId(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
-                      placeholder="e.g. Bandon2026"
-                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-white outline-none focus:border-emerald-500"
-                    />
-                    <button 
-                      onClick={() => fetchFromCloud(sheetsWebhookUrl, tripId)}
-                      disabled={isSyncing}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs rounded-lg active:scale-95 transition"
-                    >
-                      {isSyncing ? 'Loading...' : 'Connect'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* UNIVERSAL AUTO-CONNECT SHARE LINKS */}
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-bold text-slate-300 block">Universal Auto-Connect Links</span>
-                  <p className="text-[10px] text-slate-400">Send these links to players. Opening the link connects their browser directly to this live tournament.</p>
-                  <button onClick={() => handleGenerateUniversalLink('ro')} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white active:scale-95 transition">
-                    📱 Copy Viewer Link (Any Browser / Device)
-                  </button>
-                  <button onClick={() => handleGenerateUniversalLink('rw')} className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black text-xs text-slate-950 active:scale-95 transition">
-                    ✏️ Copy Scorer Link (Read / Write)
-                  </button>
-                </div>
-
-                {/* GOOGLE SHEETS WEBHOOK ENDPOINT */}
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-bold text-white block">Google Sheets Webhook Endpoint</span>
-                  <input type="text" placeholder="https://script.google.com/macros/s/.../exec" value={sheetsWebhookUrl} onChange={e => setSheetsWebhookUrl(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white outline-none" />
-                  <button onClick={() => pushToCloud()} disabled={isSyncing} className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black text-xs text-slate-950 shadow active:scale-95 transition">
-                    {isSyncing ? 'Saving to Cloud...' : '☁️ Push Updates to Google Sheet Now'}
-                  </button>
-                </div>
-
-                {/* RESET CURRENT ROUND */}
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-bold text-slate-300 block">Round Controls</span>
-                  <div className="flex gap-2">
-                    <button onClick={handleExportCSV} className="flex-1 py-1.5 rounded-lg bg-slate-800 text-xs font-bold border border-slate-700 active:scale-95 transition">Download CSV</button>
-                    {accessMode === 'rw' && (
-                      <button onClick={handleManualReset} className="px-3 py-1.5 rounded-lg bg-red-950 text-red-300 text-xs font-bold border border-red-800 active:scale-95 transition">Reset Round</button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-          </main>
-
-          {/* Bottom App Navigation Bar */}
-          <nav className="safe-bottom bg-slate-900 border-t border-slate-800 flex items-center justify-around px-2 shrink-0 z-30 shadow-lg">
-            <button onClick={() => setActiveTab('live')} className={`flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === 'live' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-sm">⛳</span>
-              <span className="text-[9px] uppercase tracking-wider">Round</span>
-            </button>
-            <button onClick={() => setActiveTab('games')} className={`flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === 'games' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-sm">🏆</span>
-              <span className="text-[9px] uppercase tracking-wider">Games</span>
-            </button>
-            <button onClick={() => setActiveTab('setup')} className={`flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === 'setup' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-sm">⚙️</span>
-              <span className="text-[9px] uppercase tracking-wider">Courses</span>
-            </button>
-            <button onClick={() => setActiveTab('roster')} className={`flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === 'roster' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-sm">👥</span>
-              <span className="text-[9px] uppercase tracking-wider">Players</span>
-            </button>
-            <button onClick={() => setActiveTab('sync')} className={`flex flex-col items-center flex-1 py-1.5 active:scale-90 transition ${activeTab === 'sync' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}>
-              <span className="text-sm">🔗</span>
-              <span className="text-[9px] uppercase tracking-wider">Sync</span>
-            </button>
-          </nav>
-
-        </div>
-      );
-    }
-
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+      ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+    })();
   </script>
 </body>
 </html>

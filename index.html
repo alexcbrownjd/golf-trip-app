@@ -44,7 +44,7 @@
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     localforage.config({
-      name: 'GolfTripCloud_DB',
+      name: 'GolfTripSync_DB_V2',
       storeName: 'trip_data'
     });
 
@@ -115,16 +115,16 @@
     ];
 
     const GAME_TYPES = [
-      { id: 'best_ball', name: 'Best Ball (Four-Ball)', short: 'Best Ball', desc: 'Lowest gross/net ball on each hole counts for the team score.' },
-      { id: 'scramble', name: 'Scramble', short: 'Scramble', desc: 'All players hit, pick best shot, all play from there until holed.' },
-      { id: 'vegas', name: 'Vegas (High-Low)', short: 'Vegas', desc: 'Teammates combine scores (e.g. 4 & 5 make 45). Birdie flips opponent score!' },
-      { id: 'skins', name: 'Skins with Carryovers', short: 'Skins', desc: 'Lowest unique score wins the skin. Ties carry over to next hole.' },
-      { id: 'wolf', name: 'Wolf (Rotating Captain)', short: 'Wolf', desc: 'Player has honor, watches drives, selects partner or goes Lone Wolf.' },
-      { id: 'stableford', name: 'Stableford Points', short: 'Stableford', desc: 'Points per hole: Dbl Bogey=0, Bogey=1, Par=2, Birdie=3, Eagle=4, Albatross=5.' },
-      { id: 'nassau', name: 'Nassau (2-2-2)', short: 'Nassau', desc: 'Three separate matches in one: Front 9 winner, Back 9 winner, and Overall 18.' },
-      { id: 'shamble', name: 'Shamble', short: 'Shamble', desc: 'Best drive chosen, each player plays own ball into cup from there.' },
-      { id: 'match_play', name: 'Match Play', short: 'Match Play', desc: 'Hole-by-hole competition. Winning a hole earns 1 point.' },
-      { id: 'quota', name: 'Quota (Chicago)', short: 'Quota', desc: 'Points scored against target quota (Quota = 36 - Handicap).' }
+      { id: 'best_ball', name: 'Best Ball (Four-Ball)', desc: 'Lowest gross/net ball on each hole counts for the team score.' },
+      { id: 'scramble', name: 'Scramble', desc: 'All players hit, pick best shot, all play from there until holed.' },
+      { id: 'vegas', name: 'Vegas (High-Low)', desc: 'Teammates combine scores (e.g. 4 & 5 make 45). Birdie flips opponent score!' },
+      { id: 'skins', name: 'Skins with Carryovers', desc: 'Lowest unique score wins the skin. Ties carry over to next hole.' },
+      { id: 'wolf', name: 'Wolf (Rotating Captain)', desc: 'Player has honor, watches drives, selects partner or goes Lone Wolf.' },
+      { id: 'stableford', name: 'Stableford Points', desc: 'Points per hole: Dbl Bogey=0, Bogey=1, Par=2, Birdie=3, Eagle=4, Albatross=5.' },
+      { id: 'nassau', name: 'Nassau (2-2-2)', desc: 'Three separate matches in one: Front 9 winner, Back 9 winner, and Overall 18.' },
+      { id: 'shamble', name: 'Shamble', desc: 'Best drive chosen, each player plays own ball into cup from there.' },
+      { id: 'match_play', name: 'Match Play', desc: 'Hole-by-hole competition. Winning a hole earns 1 point.' },
+      { id: 'quota', name: 'Quota (Chicago)', desc: 'Points scored against target quota (Quota = 36 - Handicap).' }
     ];
 
     const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
@@ -178,12 +178,56 @@
       const [manualScoreInput, setManualScoreInput] = useState('');
       const [showRosterPickerModal, setShowRosterPickerModal] = useState(false);
 
+      // Mutex references to prevent race conditions & clashing requests
+      const localLastModifiedRef = useRef(0);
+      const isPushingRef = useRef(false);
+      const pendingPushRef = useRef(false);
+
       const showToast = (msg) => {
         setToastMessage(msg);
-        setTimeout(() => setToastMessage(''), 2500);
+        setTimeout(() => setToastMessage(''), 2200);
       };
 
-      // FETCH FROM CLOUD (Two-Way Cloud Hydration)
+      // SAFE SMART MERGE: Incoming Cloud Updates never overwrite newer local modifications
+      const mergeCloudState = useCallback((cloudData) => {
+        if (!cloudData || !cloudData.courseName) return;
+
+        // If user made a local modification in the last 4 seconds, ignore older incoming cloud polls
+        const timeSinceLocalEdit = Date.now() - localLastModifiedRef.current;
+        if (timeSinceLocalEdit < 4000 && accessMode === 'rw') {
+          return;
+        }
+
+        // Merge scores hole by hole rather than blowing away local state
+        if (cloudData.scores) {
+          setScores(prevScores => {
+            const merged = { ...prevScores };
+            Object.keys(cloudData.scores).forEach(holeNum => {
+              merged[holeNum] = {
+                ...(prevScores[holeNum] || {}),
+                ...(cloudData.scores[holeNum] || {})
+              };
+            });
+            return merged;
+          });
+        }
+
+        // Only update metadata if incoming is valid
+        if (cloudData.courseName && timeSinceLocalEdit >= 4000) {
+          setCourseName(cloudData.courseName);
+          setRoundDate(cloudData.roundDate || new Date().toISOString().split('T')[0]);
+          setHolesCount(cloudData.holesCount || cloudData.holes?.length || 18);
+          if (cloudData.holes) setHoles(cloudData.holes);
+          if (cloudData.players) setPlayers(cloudData.players);
+          if (cloudData.teams) setTeams(cloudData.teams);
+          if (cloudData.activeGame) setActiveGame(cloudData.activeGame);
+          if (cloudData.pointsWager) setPointsWager(cloudData.pointsWager);
+        }
+
+        setLastCloudSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }, [accessMode]);
+
+      // FETCH FROM CLOUD
       const fetchFromCloud = useCallback(async (urlToUse, tripToUse) => {
         if (!urlToUse) return false;
         try {
@@ -191,38 +235,33 @@
           const endpoint = `${urlToUse}${urlToUse.includes('?') ? '&' : '?'}trip=${encodeURIComponent(tripToUse || 'DEFAULT_TRIP')}&t=${Date.now()}`;
           const res = await fetch(endpoint);
           const cloudData = await res.json();
-
-          if (cloudData && cloudData.courseName) {
-            setCourseName(cloudData.courseName);
-            setRoundDate(cloudData.roundDate || new Date().toISOString().split('T')[0]);
-            setHolesCount(cloudData.holesCount || cloudData.holes.length);
-            setHoles(cloudData.holes);
-            setPlayers(cloudData.players);
-            if (cloudData.teams) setTeams(cloudData.teams);
-            setActiveGame(cloudData.activeGame || 'best_ball');
-            if (cloudData.pointsWager) setPointsWager(cloudData.pointsWager);
-            if (cloudData.scores) setScores(cloudData.scores);
-            if (cloudData.savedCourses) setSavedCourses(cloudData.savedCourses);
-            if (cloudData.savedRoster) setSavedRoster(cloudData.savedRoster);
-            setLastCloudSyncTime(new Date().toLocaleTimeString());
-            return true;
-          }
+          mergeCloudState(cloudData);
+          return true;
         } catch (err) {
-          console.warn("Cloud pull failed", err);
+          console.warn("Cloud poll skipped (offline or network pause)");
         } finally {
           setIsSyncing(false);
         }
         return false;
-      }, []);
+      }, [mergeCloudState]);
 
-      // SAVE TO CLOUD (Two-Way Cloud Push)
-      const pushToCloud = useCallback(async (customPayload = null) => {
+      // QUEUED PUSH TO CLOUD (Never allows concurrent requests to collide)
+      const pushToCloud = useCallback(async () => {
         if (!sheetsWebhookUrl || accessMode === 'ro') return;
+
+        if (isPushingRef.current) {
+          pendingPushRef.current = true;
+          return;
+        }
+
+        isPushingRef.current = true;
         setIsSyncing(true);
+
         try {
-          const payload = customPayload || {
+          const payload = {
             tripId,
             timestamp: new Date().toISOString(),
+            lastModified: localLastModifiedRef.current,
             courseName,
             roundDate,
             activeGame,
@@ -243,11 +282,18 @@
             body: JSON.stringify(payload)
           });
 
-          setLastCloudSyncTime(new Date().toLocaleTimeString());
+          setLastCloudSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         } catch (err) {
           console.warn("Cloud push error", err);
         } finally {
+          isPushingRef.current = false;
           setIsSyncing(false);
+
+          // If changes were made while push was in flight, push again immediately
+          if (pendingPushRef.current) {
+            pendingPushRef.current = false;
+            pushToCloud();
+          }
         }
       }, [sheetsWebhookUrl, accessMode, tripId, courseName, roundDate, activeGame, pointsWager, holesCount, players, teams, scores, holes, savedCourses, savedRoster]);
 
@@ -255,7 +301,6 @@
       useEffect(() => {
         async function init() {
           try {
-            // 1. Read URL Parameters for Trip Code, API URL, and Mode
             let urlTrip = null;
             let urlApi = null;
             let urlMode = 'rw';
@@ -270,7 +315,6 @@
 
             setAccessMode(urlMode);
 
-            // 2. Load Local Database Cache
             const [cachedTripId, cachedSheetUrl, cachedCourses, cachedRoster, cachedRound] = await Promise.all([
               localforage.getItem(DB_KEY_TRIP_ID),
               localforage.getItem(DB_KEY_SHEET_URL),
@@ -300,14 +344,18 @@
               if (cachedRound.currentHole) setCurrentHole(cachedRound.currentHole);
             }
 
-            // 3. Immediately pull latest state from Cloud
+            // Pull fresh cloud data
             if (finalSheetUrl) {
-              const success = await fetchFromCloud(finalSheetUrl, finalTripId);
-              if (success) showToast(`Connected to Cloud Trip: ${finalTripId}`);
+              await fetchFromCloud(finalSheetUrl, finalTripId);
+            }
+
+            // Strip state param so reload won't re-trigger snapshot
+            if (window.location.hash.includes('state=')) {
+              history.replaceState(null, '', window.location.pathname + (urlMode === 'ro' ? '#mode=readonly' : ''));
             }
 
           } catch (e) {
-            console.error("Initialization error", e);
+            console.error("Init failed", e);
           } finally {
             setIsReady(true);
           }
@@ -316,16 +364,17 @@
         init();
       }, [fetchFromCloud]);
 
-      // BACKGROUND POLLING (Every 15s in Spectator Mode to keep all carts in sync)
+      // BACKGROUND POLLING (Every 12s in Spectator Mode, 25s in Scorer Mode)
       useEffect(() => {
         if (!sheetsWebhookUrl || !isReady) return;
+        const pollRate = accessMode === 'ro' ? 12000 : 25000;
         const interval = setInterval(() => {
           fetchFromCloud(sheetsWebhookUrl, tripId);
-        }, 15000);
+        }, pollRate);
         return () => clearInterval(interval);
-      }, [sheetsWebhookUrl, tripId, isReady, fetchFromCloud]);
+      }, [sheetsWebhookUrl, tripId, isReady, accessMode, fetchFromCloud]);
 
-      // AUTO-SAVE TO LOCAL DATABASE & CLOUD DEBOUNCE
+      // AUTO-SAVE TO LOCAL DATABASE & CLOUD
       useEffect(() => {
         if (!isReady || accessMode === 'ro') return;
 
@@ -350,15 +399,60 @@
         localforage.setItem(DB_KEY_COURSES, savedCourses);
         localforage.setItem(DB_KEY_ROSTER, savedRoster);
 
-        // Debounced Cloud Push
+        // Debounce cloud push to prevent spamming
         const cloudTimer = setTimeout(() => {
           pushToCloud();
-        }, 800);
+        }, 1200);
 
         return () => clearTimeout(cloudTimer);
       }, [isReady, accessMode, tripId, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl, savedCourses, savedRoster, pushToCloud]);
 
-      // SHARE UNIVERSAL CLOUD LINK (Works on any browser/device without resetting)
+      // Mobile Flush Handler
+      useEffect(() => {
+        const handleFlush = () => {
+          if (accessMode === 'rw' && sheetsWebhookUrl) {
+            pushToCloud();
+          }
+        };
+        window.addEventListener('pagehide', handleFlush);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') handleFlush();
+        });
+        return () => {
+          window.removeEventListener('pagehide', handleFlush);
+        };
+      }, [accessMode, sheetsWebhookUrl, pushToCloud]);
+
+      // OPTIMISTIC ZERO-LAG SCORE HANDLER
+      const handleSetScore = (holeNum, playerId, scoreValue) => {
+        if (accessMode === 'ro') {
+          showToast('Spectator mode: Scoring locked');
+          return;
+        }
+
+        // Set local lock timestamp so incoming cloud sync won't clobber this score
+        localLastModifiedRef.current = Date.now();
+
+        const val = scoreValue === null || scoreValue === undefined ? null : Number(scoreValue);
+        setScores(prev => ({
+          ...prev,
+          [holeNum]: { ...(prev[holeNum] || {}), [playerId]: val }
+        }));
+      };
+
+      const advanceToNext = () => {
+        const playerIdx = players.findIndex(p => p.id === selectedPlayerId);
+        if (playerIdx < players.length - 1) {
+          setSelectedPlayerId(players[playerIdx + 1].id);
+        } else {
+          if (currentHole < holesCount) {
+            setCurrentHole(prev => prev + 1);
+            setSelectedPlayerId(players[0].id);
+          }
+        }
+      };
+
+      // SHARE UNIVERSAL CLOUD LINK
       const handleGenerateUniversalLink = (targetMode) => {
         const modeParam = targetMode === 'ro' ? 'mode=readonly' : 'mode=scorer';
         const tripParam = `trip=${encodeURIComponent(tripId)}`;
@@ -371,11 +465,12 @@
         temp.select();
         document.execCommand('copy');
         document.body.removeChild(temp);
-        showToast(targetMode === 'ro' ? 'Viewer Link copied (Works on any device!)' : 'Scorer Link copied!');
+        showToast(targetMode === 'ro' ? 'Viewer Link copied!' : 'Scorer Link copied!');
       };
 
       // COURSE LIBRARY ACTIONS
       const handleSaveCurrentCourseToLibrary = () => {
+        localLastModifiedRef.current = Date.now();
         const courseId = `c_${Date.now()}`;
         const newEntry = {
           id: courseId,
@@ -386,11 +481,12 @@
 
         const updated = [newEntry, ...savedCourses.filter(c => c.name.toLowerCase() !== newEntry.name.toLowerCase())];
         setSavedCourses(updated);
-        showToast(`Saved "${newEntry.name}" permanently!`);
+        showToast(`Saved "${newEntry.name}"!`);
       };
 
       const handleLoadCourseFromLibrary = (courseObj) => {
         if (accessMode === 'ro') return;
+        localLastModifiedRef.current = Date.now();
         setCourseName(courseObj.name);
         setHolesCount(courseObj.holesCount);
         setHoles(JSON.parse(JSON.stringify(courseObj.holes)));
@@ -406,7 +502,8 @@
       };
 
       const handleDeleteCourseFromLibrary = (id, name) => {
-        if (confirm(`Delete "${name}" from your permanent library?`)) {
+        if (confirm(`Delete "${name}" from library?`)) {
+          localLastModifiedRef.current = Date.now();
           setSavedCourses(prev => prev.filter(c => c.id !== id));
           showToast(`Deleted "${name}"`);
         }
@@ -414,6 +511,7 @@
 
       // GOLFER ROSTER ACTIONS
       const handleSaveCurrentPlayersToRoster = () => {
+        localLastModifiedRef.current = Date.now();
         const rosterMap = new Map(savedRoster.map(p => [p.name.toLowerCase(), p]));
         players.forEach(p => {
           rosterMap.set(p.name.toLowerCase(), {
@@ -428,6 +526,7 @@
       };
 
       const handleAddPlayerFromSavedRoster = (savedPlayer) => {
+        localLastModifiedRef.current = Date.now();
         if (players.some(p => p.name.toLowerCase() === savedPlayer.name.toLowerCase())) {
           showToast(`${savedPlayer.name} is already in the round`);
           return;
@@ -459,32 +558,9 @@
         return holes.find(h => h.num === currentHole) || { num: currentHole, par: 4, hcp: 1, yardage: 400 };
       }, [holes, currentHole]);
 
-      const handleSetScore = (holeNum, playerId, scoreValue) => {
-        if (accessMode === 'ro') {
-          showToast('Spectator mode: Scoring locked');
-          return;
-        }
-        const val = scoreValue === null || scoreValue === undefined ? null : Number(scoreValue);
-        setScores(prev => ({
-          ...prev,
-          [holeNum]: { ...(prev[holeNum] || {}), [playerId]: val }
-        }));
-      };
-
-      const advanceToNext = () => {
-        const playerIdx = players.findIndex(p => p.id === selectedPlayerId);
-        if (playerIdx < players.length - 1) {
-          setSelectedPlayerId(players[playerIdx + 1].id);
-        } else {
-          if (currentHole < holesCount) {
-            setCurrentHole(prev => prev + 1);
-            setSelectedPlayerId(players[0].id);
-          }
-        }
-      };
-
       const handleAddBlankPlayer = () => {
         if (accessMode === 'ro') return;
+        localLastModifiedRef.current = Date.now();
         const newId = `p_${Date.now()}`;
         const color = COLOR_PALETTE[players.length % COLOR_PALETTE.length];
         setPlayers(prev => [
@@ -500,21 +576,25 @@
           showToast('Must keep at least 1 player');
           return;
         }
+        localLastModifiedRef.current = Date.now();
         setPlayers(prev => prev.filter(p => p.id !== id));
       };
 
       const handleUpdatePlayer = (id, field, value) => {
         if (accessMode === 'ro') return;
+        localLastModifiedRef.current = Date.now();
         setPlayers(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
       };
 
       const handleUpdateHole = (holeNum, field, val) => {
         if (accessMode === 'ro') return;
+        localLastModifiedRef.current = Date.now();
         setHoles(prev => prev.map(h => h.num === holeNum ? { ...h, [field]: Number(val) || val } : h));
       };
 
       const handleManualReset = () => {
-        if (confirm("Reset active scores? (Course library and saved roster will NOT be deleted)")) {
+        if (confirm("Reset active scores? (Courses and saved roster will NOT be deleted)")) {
+          localLastModifiedRef.current = Date.now();
           const freshScores = {};
           for (let i = 1; i <= holesCount; i++) freshScores[i] = {};
           setScores(freshScores);
@@ -757,6 +837,7 @@
                   <select 
                     value={activeGame} 
                     onChange={(e) => {
+                      localLastModifiedRef.current = Date.now();
                       setActiveGame(e.target.value);
                       showToast(`Game: ${GAME_TYPES.find(g => g.id === e.target.value)?.name}`);
                     }}
@@ -1061,7 +1142,7 @@
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm font-black text-white">Tournament Games</h2>
                   {accessMode === 'rw' ? (
-                    <select value={activeGame} onChange={e => setActiveGame(e.target.value)} className="bg-slate-900 border border-slate-700 text-emerald-400 text-xs font-bold rounded-lg px-2 py-1 outline-none">
+                    <select value={activeGame} onChange={e => { localLastModifiedRef.current = Date.now(); setActiveGame(e.target.value); }} className="bg-slate-900 border border-slate-700 text-emerald-400 text-xs font-bold rounded-lg px-2 py-1 outline-none">
                       {GAME_TYPES.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
                   ) : (
@@ -1150,17 +1231,17 @@
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Course Name</label>
-                    <input type="text" disabled={accessMode === 'ro'} value={courseName} onChange={e => setCourseName(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
+                    <input type="text" disabled={accessMode === 'ro'} value={courseName} onChange={e => { localLastModifiedRef.current = Date.now(); setCourseName(e.target.value); }} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Round Date</label>
-                    <input type="date" disabled={accessMode === 'ro'} value={roundDate} onChange={e => setRoundDate(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
+                    <input type="date" disabled={accessMode === 'ro'} value={roundDate} onChange={e => { localLastModifiedRef.current = Date.now(); setRoundDate(e.target.value); }} className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold outline-none focus:border-emerald-500" />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Holes Count</label>
                     <div className="flex gap-1.5">
-                      <button disabled={accessMode === 'ro'} onClick={() => setHolesCount(9)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${holesCount === 9 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>9 H</button>
-                      <button disabled={accessMode === 'ro'} onClick={() => setHolesCount(18)} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${holesCount === 18 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>18 H</button>
+                      <button disabled={accessMode === 'ro'} onClick={() => { localLastModifiedRef.current = Date.now(); setHolesCount(9); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${holesCount === 9 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>9 H</button>
+                      <button disabled={accessMode === 'ro'} onClick={() => { localLastModifiedRef.current = Date.now(); setHolesCount(18); }} className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${holesCount === 18 ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 border-slate-800'}`}>18 H</button>
                     </div>
                   </div>
                 </div>
@@ -1337,7 +1418,7 @@
                 {/* UNIVERSAL AUTO-CONNECT SHARE LINKS */}
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
                   <span className="text-[11px] font-bold text-slate-300 block">Universal Auto-Connect Links</span>
-                  <p className="text-[10px] text-slate-400">Send these links to players. Opening the link will instantly connect their browser to your Trip Cloud ID.</p>
+                  <p className="text-[10px] text-slate-400">Send these links to players. Opening the link connects their browser directly to this live tournament.</p>
                   <button onClick={() => handleGenerateUniversalLink('ro')} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white active:scale-95 transition">
                     📱 Copy Viewer Link (Any Browser / Device)
                   </button>

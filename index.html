@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Golf Trip Live Scoring</title>
 
-  <!-- Tailwind CSS, React, and Babel Standalone (Zero-Build CDN) -->
+  <!-- Tailwind CSS, React, Babel Standalone & localForage (IndexedDB Engine) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 
   <style>
     :root {
@@ -42,9 +43,16 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    const KEY_ROUND = 'GOLF_TRIP_ACTIVE_ROUND_STABLE';
-    const KEY_COURSES = 'GOLF_TRIP_COURSES_LIB_STABLE';
-    const KEY_ROSTER = 'GOLF_TRIP_ROSTER_LIB_STABLE';
+    localforage.config({
+      name: 'GolfTripCloud_DB',
+      storeName: 'trip_data'
+    });
+
+    const DB_KEY_TRIP_ID = 'ACTIVE_TRIP_ID';
+    const DB_KEY_SHEET_URL = 'CONFIG_SHEETS_URL';
+    const DB_KEY_ROUND = 'ACTIVE_ROUND_CACHE';
+    const DB_KEY_COURSES = 'SAVED_COURSES_LIB';
+    const DB_KEY_ROSTER = 'SAVED_ROSTER_LIB';
 
     const DEFAULT_COURSES = [
       {
@@ -96,22 +104,6 @@
           { num: 17, par: 3, hcp: 15, yardage: 178 },
           { num: 18, par: 5, hcp: 3, yardage: 543 }
         ]
-      },
-      {
-        id: 'executive9',
-        name: "Cypress Dunes (9-Hole Exec)",
-        holesCount: 9,
-        holes: [
-          { num: 1, par: 4, hcp: 3, yardage: 335 },
-          { num: 2, par: 3, hcp: 7, yardage: 150 },
-          { num: 3, par: 4, hcp: 1, yardage: 385 },
-          { num: 4, par: 5, hcp: 5, yardage: 490 },
-          { num: 5, par: 3, hcp: 9, yardage: 165 },
-          { num: 6, par: 4, hcp: 2, yardage: 360 },
-          { num: 7, par: 4, hcp: 6, yardage: 340 },
-          { num: 8, par: 3, hcp: 8, yardage: 140 },
-          { num: 9, par: 5, hcp: 4, yardage: 510 }
-        ]
       }
     ];
 
@@ -119,9 +111,7 @@
       { id: 'sp1', name: 'Alex M.', hcp: 8, color: '#10B981' },
       { id: 'sp2', name: 'Jake T.', hcp: 14, color: '#3B82F6' },
       { id: 'sp3', name: 'Ryan C.', hcp: 10, color: '#F59E0B' },
-      { id: 'sp4', name: 'Dave K.', hcp: 18, color: '#EC4899' },
-      { id: 'sp5', name: 'Chris B.', hcp: 12, color: '#8B5CF6' },
-      { id: 'sp6', name: 'Matt S.', hcp: 6, color: '#14B8A6' }
+      { id: 'sp4', name: 'Dave K.', hcp: 18, color: '#EC4899' }
     ];
 
     const GAME_TYPES = [
@@ -139,151 +129,249 @@
 
     const COLOR_PALETTE = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#14B8A6', '#EF4444', '#06B6D4'];
 
-    // Safe synchronous loader
-    function loadStorage(key, fallback) {
-      try {
-        const val = localStorage.getItem(key);
-        if (val) return JSON.parse(val);
-      } catch (e) {
-        console.warn('Storage read error for ' + key, e);
-      }
-      return fallback;
-    }
-
-    // Direct synchronous saver
-    function saveStorage(key, value) {
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-      } catch (e) {
-        console.warn('Storage write error for ' + key, e);
-      }
-    }
-
     function App() {
-      // 1. Check if URL has state payload (for 1-time import)
-      let initialImport = null;
-      let initialMode = 'rw';
-      try {
-        const hash = window.location.hash;
-        if (hash) {
-          if (hash.includes('mode=readonly') || hash.includes('mode=ro')) initialMode = 'ro';
-          if (hash.includes('state=')) {
-            const params = new URLSearchParams(hash.replace(/^#/, ''));
-            const s = params.get('state');
-            if (s) initialImport = JSON.parse(decodeURIComponent(s));
-          }
-        }
-      } catch (e) {}
-
-      // Clean the URL bar immediately so browser refresh won't re-trigger static snapshot
-      useEffect(() => {
-        if (window.location.hash.includes('state=')) {
-          try {
-            history.replaceState(null, '', window.location.pathname + (initialMode === 'ro' ? '#mode=readonly' : ''));
-          } catch (e) {}
-        }
-      }, [initialMode]);
-
-      const [accessMode, setAccessMode] = useState(initialMode);
+      const [isReady, setIsReady] = useState(false);
+      const [accessMode, setAccessMode] = useState('rw');
       const [activeTab, setActiveTab] = useState('live');
       const [toastMessage, setToastMessage] = useState('');
+      const [lastCloudSyncTime, setLastCloudSyncTime] = useState(null);
 
-      // LIBRARIES (Loaded synchronously)
-      const [savedCourses, setSavedCourses] = useState(() => loadStorage(KEY_COURSES, DEFAULT_COURSES));
-      const [savedRoster, setSavedRoster] = useState(() => loadStorage(KEY_ROSTER, DEFAULT_SAVED_PLAYERS));
+      // Cloud Identity Settings
+      const [tripId, setTripId] = useState('GolfTrip2026');
+      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState('');
+      const [isSyncing, setIsSyncing] = useState(false);
 
-      // ACTIVE ROUND (Imported link > Local storage > Defaults)
-      const cachedRound = loadStorage(KEY_ROUND, null);
-      const seed = initialImport || cachedRound;
+      // Tournament Libraries
+      const [savedCourses, setSavedCourses] = useState(DEFAULT_COURSES);
+      const [savedRoster, setSavedRoster] = useState(DEFAULT_SAVED_PLAYERS);
 
-      const [courseName, setCourseName] = useState(() => seed?.c || seed?.courseName || 'Pinehurst No. 2');
-      const [roundDate, setRoundDate] = useState(() => seed?.d || seed?.roundDate || new Date().toISOString().split('T')[0]);
-      const [holesCount, setHolesCount] = useState(() => seed?.h || seed?.holesCount || 18);
-      const [holes, setHoles] = useState(() => seed?.hl || seed?.holes || DEFAULT_COURSES[0].holes);
+      // Active Round State
+      const [courseName, setCourseName] = useState('Pinehurst No. 2');
+      const [roundDate, setRoundDate] = useState(new Date().toISOString().split('T')[0]);
+      const [holesCount, setHolesCount] = useState(18);
+      const [holes, setHoles] = useState(DEFAULT_COURSES[0].holes);
       
-      const [players, setPlayers] = useState(() => seed?.p || seed?.players || [
+      const [players, setPlayers] = useState([
         { id: 'p1', name: 'Alex M.', hcp: 8, team: 'A', color: '#10B981' },
         { id: 'p2', name: 'Jake T.', hcp: 14, team: 'A', color: '#3B82F6' },
         { id: 'p3', name: 'Ryan C.', hcp: 10, team: 'B', color: '#F59E0B' },
         { id: 'p4', name: 'Dave K.', hcp: 18, team: 'B', color: '#EC4899' },
       ]);
 
-      const [teams, setTeams] = useState(() => seed?.t || seed?.teams || [
+      const [teams, setTeams] = useState([
         { id: 'A', name: 'Team Eagles' },
         { id: 'B', name: 'Team Birdies' }
       ]);
 
-      const [activeGame, setActiveGame] = useState(() => seed?.g || seed?.activeGame || 'best_ball');
-      const [pointsWager, setPointsWager] = useState(() => seed?.w || seed?.pointsWager || 10);
+      const [activeGame, setActiveGame] = useState('best_ball');
+      const [pointsWager, setPointsWager] = useState(10);
 
       const [scores, setScores] = useState(() => {
-        const rawScores = seed?.s || seed?.scores;
-        if (rawScores && Object.keys(rawScores).length > 0) return rawScores;
         const initial = {};
         for (let i = 1; i <= 18; i++) initial[i] = { p1: null, p2: null, p3: null, p4: null };
         return initial;
       });
 
-      const [currentHole, setCurrentHole] = useState(() => seed?.currentHole || 1);
+      const [currentHole, setCurrentHole] = useState(1);
       const [selectedPlayerId, setSelectedPlayerId] = useState('p1');
-      const [sheetsWebhookUrl, setSheetsWebhookUrl] = useState(() => seed?.sheetsWebhookUrl || '');
-      const [isSyncing, setIsSyncing] = useState(false);
       const [showOtherModal, setShowOtherModal] = useState(false);
       const [manualScoreInput, setManualScoreInput] = useState('');
       const [showRosterPickerModal, setShowRosterPickerModal] = useState(false);
 
-      // Centralized Synchronous Save Function
-      const persistCurrentState = useCallback(() => {
-        if (accessMode === 'rw') {
-          const snapshot = {
-            courseName,
-            roundDate,
-            holesCount,
-            holes,
-            players,
-            teams,
-            activeGame,
-            pointsWager,
-            scores,
-            currentHole,
-            sheetsWebhookUrl,
-            updatedAt: Date.now()
-          };
-          saveStorage(KEY_ROUND, snapshot);
-        }
-      }, [accessMode, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl]);
-
-      // Save on State Change
-      useEffect(() => {
-        persistCurrentState();
-      }, [persistCurrentState]);
-
-      // Mobile Lifecycle Listeners: Save when switching apps or locking phone
-      useEffect(() => {
-        const handleFlush = () => persistCurrentState();
-        window.addEventListener('pagehide', handleFlush);
-        window.addEventListener('beforeunload', handleFlush);
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'hidden') persistCurrentState();
-        });
-        return () => {
-          window.removeEventListener('pagehide', handleFlush);
-          window.removeEventListener('beforeunload', handleFlush);
-        };
-      }, [persistCurrentState]);
-
-      // Save Courses & Roster updates
-      useEffect(() => {
-        saveStorage(KEY_COURSES, savedCourses);
-      }, [savedCourses]);
-
-      useEffect(() => {
-        saveStorage(KEY_ROSTER, savedRoster);
-      }, [savedRoster]);
-
       const showToast = (msg) => {
         setToastMessage(msg);
         setTimeout(() => setToastMessage(''), 2500);
+      };
+
+      // FETCH FROM CLOUD (Two-Way Cloud Hydration)
+      const fetchFromCloud = useCallback(async (urlToUse, tripToUse) => {
+        if (!urlToUse) return false;
+        try {
+          setIsSyncing(true);
+          const endpoint = `${urlToUse}${urlToUse.includes('?') ? '&' : '?'}trip=${encodeURIComponent(tripToUse || 'DEFAULT_TRIP')}&t=${Date.now()}`;
+          const res = await fetch(endpoint);
+          const cloudData = await res.json();
+
+          if (cloudData && cloudData.courseName) {
+            setCourseName(cloudData.courseName);
+            setRoundDate(cloudData.roundDate || new Date().toISOString().split('T')[0]);
+            setHolesCount(cloudData.holesCount || cloudData.holes.length);
+            setHoles(cloudData.holes);
+            setPlayers(cloudData.players);
+            if (cloudData.teams) setTeams(cloudData.teams);
+            setActiveGame(cloudData.activeGame || 'best_ball');
+            if (cloudData.pointsWager) setPointsWager(cloudData.pointsWager);
+            if (cloudData.scores) setScores(cloudData.scores);
+            if (cloudData.savedCourses) setSavedCourses(cloudData.savedCourses);
+            if (cloudData.savedRoster) setSavedRoster(cloudData.savedRoster);
+            setLastCloudSyncTime(new Date().toLocaleTimeString());
+            return true;
+          }
+        } catch (err) {
+          console.warn("Cloud pull failed", err);
+        } finally {
+          setIsSyncing(false);
+        }
+        return false;
+      }, []);
+
+      // SAVE TO CLOUD (Two-Way Cloud Push)
+      const pushToCloud = useCallback(async (customPayload = null) => {
+        if (!sheetsWebhookUrl || accessMode === 'ro') return;
+        setIsSyncing(true);
+        try {
+          const payload = customPayload || {
+            tripId,
+            timestamp: new Date().toISOString(),
+            courseName,
+            roundDate,
+            activeGame,
+            pointsWager,
+            holesCount,
+            players,
+            teams,
+            scores,
+            holes: holes.slice(0, holesCount),
+            savedCourses,
+            savedRoster
+          };
+
+          await fetch(sheetsWebhookUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          setLastCloudSyncTime(new Date().toLocaleTimeString());
+        } catch (err) {
+          console.warn("Cloud push error", err);
+        } finally {
+          setIsSyncing(false);
+        }
+      }, [sheetsWebhookUrl, accessMode, tripId, courseName, roundDate, activeGame, pointsWager, holesCount, players, teams, scores, holes, savedCourses, savedRoster]);
+
+      // INITIAL HYDRATION ON MOUNT
+      useEffect(() => {
+        async function init() {
+          try {
+            // 1. Read URL Parameters for Trip Code, API URL, and Mode
+            let urlTrip = null;
+            let urlApi = null;
+            let urlMode = 'rw';
+
+            if (window.location.hash) {
+              const hashClean = window.location.hash.replace(/^#/, '');
+              const params = new URLSearchParams(hashClean);
+              if (params.get('mode') === 'readonly' || params.get('mode') === 'ro') urlMode = 'ro';
+              if (params.get('trip')) urlTrip = params.get('trip');
+              if (params.get('api')) urlApi = decodeURIComponent(params.get('api'));
+            }
+
+            setAccessMode(urlMode);
+
+            // 2. Load Local Database Cache
+            const [cachedTripId, cachedSheetUrl, cachedCourses, cachedRoster, cachedRound] = await Promise.all([
+              localforage.getItem(DB_KEY_TRIP_ID),
+              localforage.getItem(DB_KEY_SHEET_URL),
+              localforage.getItem(DB_KEY_COURSES),
+              localforage.getItem(DB_KEY_ROSTER),
+              localforage.getItem(DB_KEY_ROUND)
+            ]);
+
+            const finalTripId = urlTrip || cachedTripId || 'GolfTrip2026';
+            const finalSheetUrl = urlApi || cachedSheetUrl || '';
+
+            setTripId(finalTripId);
+            setSheetsWebhookUrl(finalSheetUrl);
+            if (cachedCourses) setSavedCourses(cachedCourses);
+            if (cachedRoster) setSavedRoster(cachedRoster);
+
+            if (cachedRound) {
+              if (cachedRound.courseName) setCourseName(cachedRound.courseName);
+              if (cachedRound.roundDate) setRoundDate(cachedRound.roundDate);
+              if (cachedRound.holesCount) setHolesCount(cachedRound.holesCount);
+              if (cachedRound.holes) setHoles(cachedRound.holes);
+              if (cachedRound.players) setPlayers(cachedRound.players);
+              if (cachedRound.teams) setTeams(cachedRound.teams);
+              if (cachedRound.activeGame) setActiveGame(cachedRound.activeGame);
+              if (cachedRound.pointsWager) setPointsWager(cachedRound.pointsWager);
+              if (cachedRound.scores) setScores(cachedRound.scores);
+              if (cachedRound.currentHole) setCurrentHole(cachedRound.currentHole);
+            }
+
+            // 3. Immediately pull latest state from Cloud
+            if (finalSheetUrl) {
+              const success = await fetchFromCloud(finalSheetUrl, finalTripId);
+              if (success) showToast(`Connected to Cloud Trip: ${finalTripId}`);
+            }
+
+          } catch (e) {
+            console.error("Initialization error", e);
+          } finally {
+            setIsReady(true);
+          }
+        }
+
+        init();
+      }, [fetchFromCloud]);
+
+      // BACKGROUND POLLING (Every 15s in Spectator Mode to keep all carts in sync)
+      useEffect(() => {
+        if (!sheetsWebhookUrl || !isReady) return;
+        const interval = setInterval(() => {
+          fetchFromCloud(sheetsWebhookUrl, tripId);
+        }, 15000);
+        return () => clearInterval(interval);
+      }, [sheetsWebhookUrl, tripId, isReady, fetchFromCloud]);
+
+      // AUTO-SAVE TO LOCAL DATABASE & CLOUD DEBOUNCE
+      useEffect(() => {
+        if (!isReady || accessMode === 'ro') return;
+
+        const roundSnapshot = {
+          tripId,
+          courseName,
+          roundDate,
+          holesCount,
+          holes,
+          players,
+          teams,
+          activeGame,
+          pointsWager,
+          scores,
+          currentHole,
+          sheetsWebhookUrl
+        };
+
+        localforage.setItem(DB_KEY_ROUND, roundSnapshot);
+        localforage.setItem(DB_KEY_TRIP_ID, tripId);
+        localforage.setItem(DB_KEY_SHEET_URL, sheetsWebhookUrl);
+        localforage.setItem(DB_KEY_COURSES, savedCourses);
+        localforage.setItem(DB_KEY_ROSTER, savedRoster);
+
+        // Debounced Cloud Push
+        const cloudTimer = setTimeout(() => {
+          pushToCloud();
+        }, 800);
+
+        return () => clearTimeout(cloudTimer);
+      }, [isReady, accessMode, tripId, courseName, roundDate, holesCount, holes, players, teams, activeGame, pointsWager, scores, currentHole, sheetsWebhookUrl, savedCourses, savedRoster, pushToCloud]);
+
+      // SHARE UNIVERSAL CLOUD LINK (Works on any browser/device without resetting)
+      const handleGenerateUniversalLink = (targetMode) => {
+        const modeParam = targetMode === 'ro' ? 'mode=readonly' : 'mode=scorer';
+        const tripParam = `trip=${encodeURIComponent(tripId)}`;
+        const apiParam = sheetsWebhookUrl ? `&api=${encodeURIComponent(sheetsWebhookUrl)}` : '';
+        const universalUrl = `${window.location.origin}${window.location.pathname}#${modeParam}&${tripParam}${apiParam}`;
+
+        const temp = document.createElement('input');
+        temp.value = universalUrl;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        document.body.removeChild(temp);
+        showToast(targetMode === 'ro' ? 'Viewer Link copied (Works on any device!)' : 'Scorer Link copied!');
       };
 
       // COURSE LIBRARY ACTIONS
@@ -298,8 +386,7 @@
 
         const updated = [newEntry, ...savedCourses.filter(c => c.name.toLowerCase() !== newEntry.name.toLowerCase())];
         setSavedCourses(updated);
-        saveStorage(KEY_COURSES, updated);
-        showToast(`Saved "${newEntry.name}" to library!`);
+        showToast(`Saved "${newEntry.name}" permanently!`);
       };
 
       const handleLoadCourseFromLibrary = (courseObj) => {
@@ -319,15 +406,13 @@
       };
 
       const handleDeleteCourseFromLibrary = (id, name) => {
-        if (confirm(`Delete "${name}" from your course library?`)) {
-          const updated = savedCourses.filter(c => c.id !== id);
-          setSavedCourses(updated);
-          saveStorage(KEY_COURSES, updated);
+        if (confirm(`Delete "${name}" from your permanent library?`)) {
+          setSavedCourses(prev => prev.filter(c => c.id !== id));
           showToast(`Deleted "${name}"`);
         }
       };
 
-      // GOLFER ROSTER LIBRARY ACTIONS
+      // GOLFER ROSTER ACTIONS
       const handleSaveCurrentPlayersToRoster = () => {
         const rosterMap = new Map(savedRoster.map(p => [p.name.toLowerCase(), p]));
         players.forEach(p => {
@@ -338,15 +423,13 @@
             color: p.color
           });
         });
-        const updated = Array.from(rosterMap.values());
-        setSavedRoster(updated);
-        saveStorage(KEY_ROSTER, updated);
+        setSavedRoster(Array.from(rosterMap.values()));
         showToast('Roster saved permanently!');
       };
 
       const handleAddPlayerFromSavedRoster = (savedPlayer) => {
         if (players.some(p => p.name.toLowerCase() === savedPlayer.name.toLowerCase())) {
-          showToast(`${savedPlayer.name} already in round`);
+          showToast(`${savedPlayer.name} is already in the round`);
           return;
         }
         const newPlayerInstance = {
@@ -361,9 +444,7 @@
       };
 
       const handleDeletePlayerFromRoster = (id, name) => {
-        const updated = savedRoster.filter(p => p.id !== id);
-        setSavedRoster(updated);
-        saveStorage(KEY_ROSTER, updated);
+        setSavedRoster(prev => prev.filter(p => p.id !== id));
         showToast(`Removed ${name}`);
       };
 
@@ -378,25 +459,16 @@
         return holes.find(h => h.num === currentHole) || { num: currentHole, par: 4, hcp: 1, yardage: 400 };
       }, [holes, currentHole]);
 
-      // Direct Scoring Mutation with Immediate Write
       const handleSetScore = (holeNum, playerId, scoreValue) => {
         if (accessMode === 'ro') {
           showToast('Spectator mode: Scoring locked');
           return;
         }
         const val = scoreValue === null || scoreValue === undefined ? null : Number(scoreValue);
-        setScores(prev => {
-          const updated = {
-            ...prev,
-            [holeNum]: { ...(prev[holeNum] || {}), [playerId]: val }
-          };
-          // Direct synchronous write
-          saveStorage(KEY_ROUND, {
-            courseName, roundDate, holesCount, holes, players, teams,
-            activeGame, pointsWager, scores: updated, currentHole, sheetsWebhookUrl
-          });
-          return updated;
-        });
+        setScores(prev => ({
+          ...prev,
+          [holeNum]: { ...(prev[holeNum] || {}), [playerId]: val }
+        }));
       };
 
       const advanceToNext = () => {
@@ -442,20 +514,16 @@
       };
 
       const handleManualReset = () => {
-        if (confirm("Reset active scores? (Course library and saved golfers will NOT be deleted)")) {
+        if (confirm("Reset active scores? (Course library and saved roster will NOT be deleted)")) {
           const freshScores = {};
           for (let i = 1; i <= holesCount; i++) freshScores[i] = {};
           setScores(freshScores);
           setCurrentHole(1);
-          saveStorage(KEY_ROUND, {
-            courseName, roundDate, holesCount, holes, players, teams,
-            activeGame, pointsWager, scores: freshScores, currentHole: 1, sheetsWebhookUrl
-          });
           showToast('Active round reset!');
         }
       };
 
-      // Player Calculations
+      // Player Metrics Calculations
       const playerStats = useMemo(() => {
         return players.map(player => {
           let totalGross = 0, totalNet = 0, totalPar = 0, holesPlayed = 0, stablefordPoints = 0, skinsWon = 0;
@@ -600,38 +668,8 @@
         return <span className="inline-flex items-center justify-center w-5 h-5 bg-red-200 text-red-950 border border-red-600 ring-1 ring-red-400 font-black text-[11px] leading-none">{gross}</span>;
       };
 
-      const handlePushToSheets = async () => {
-        if (!sheetsWebhookUrl) {
-          showToast('Enter Google Apps Script URL');
-          return;
-        }
-        setIsSyncing(true);
-        try {
-          const payload = {
-            timestamp: new Date().toISOString(),
-            courseName,
-            roundDate,
-            activeGame,
-            players,
-            scores,
-            holes: holes.slice(0, holesCount)
-          };
-          await fetch(sheetsWebhookUrl, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          showToast('Sent to Google Sheet!');
-        } catch (e) {
-          showToast('Network error syncing');
-        } finally {
-          setIsSyncing(false);
-        }
-      };
-
       const handleExportCSV = () => {
-        let csv = `Course: ${courseName}, Date: ${roundDate}, Holes: ${holesCount}, Game: ${activeGame}\n\n`;
+        let csv = `Trip ID: ${tripId}, Course: ${courseName}, Date: ${roundDate}, Holes: ${holesCount}, Game: ${activeGame}\n\n`;
         csv += `Hole,${holes.slice(0, holesCount).map(h => h.num).join(',')},Total Gross,Total Net,To Par,Stableford,Quota +/-\n`;
         csv += `Par,${holes.slice(0, holesCount).map(h => h.par).join(',')},${holes.slice(0, holesCount).reduce((a,b)=>a+b.par,0)},,,,\n`;
         csv += `HCP,${holes.slice(0, holesCount).map(h => h.hcp).join(',')},,,,,\n`;
@@ -645,24 +683,9 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `GolfTrip_${courseName.replace(/\s+/g, '_')}_${roundDate}.csv`;
+        a.download = `${tripId}_${courseName.replace(/\s+/g, '_')}_${roundDate}.csv`;
         a.click();
         showToast('CSV downloaded!');
-      };
-
-      const handleGenerateShareLink = (targetMode) => {
-        const compactState = { c: courseName, d: roundDate, h: holesCount, hl: holes, p: players, t: teams, g: activeGame, w: pointsWager, s: scores };
-        const encoded = encodeURIComponent(JSON.stringify(compactState));
-        const modeParam = targetMode === 'ro' ? 'mode=readonly&' : 'mode=scorer&';
-        const shareUrl = `${window.location.origin}${window.location.pathname}#${modeParam}state=${encoded}`;
-        
-        const temp = document.createElement('input');
-        temp.value = shareUrl;
-        document.body.appendChild(temp);
-        temp.select();
-        document.execCommand('copy');
-        document.body.removeChild(temp);
-        showToast(targetMode === 'ro' ? 'Viewer link copied!' : 'Scorer link copied!');
       };
 
       const quickScoreButtons = useMemo(() => {
@@ -733,7 +756,10 @@
                 {accessMode === 'rw' ? (
                   <select 
                     value={activeGame} 
-                    onChange={(e) => setActiveGame(e.target.value)}
+                    onChange={(e) => {
+                      setActiveGame(e.target.value);
+                      showToast(`Game: ${GAME_TYPES.find(g => g.id === e.target.value)?.name}`);
+                    }}
                     className="bg-transparent text-[11px] text-emerald-400 font-bold border-none outline-none cursor-pointer p-0 m-0"
                   >
                     {GAME_TYPES.map(g => (
@@ -748,7 +774,7 @@
 
             <div className="flex items-center space-x-1">
               {accessMode === 'rw' ? (
-                <button onClick={() => handleGenerateShareLink('ro')} className="px-2 py-1 rounded-md bg-blue-900/60 text-blue-200 text-[11px] font-semibold border border-blue-700/60 active:scale-95 transition">
+                <button onClick={() => handleGenerateUniversalLink('ro')} className="px-2 py-1 rounded-md bg-blue-900/60 text-blue-200 text-[11px] font-semibold border border-blue-700/60 active:scale-95 transition">
                   Share
                 </button>
               ) : (
@@ -756,7 +782,10 @@
                   Unlock
                 </button>
               )}
-              <button onClick={handleExportCSV} className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs active:scale-95 transition">
+              <button onClick={() => fetchFromCloud(sheetsWebhookUrl, tripId)} disabled={isSyncing} className={`p-1 rounded-md bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 border border-emerald-700/60 text-xs active:scale-95 transition ${isSyncing ? 'animate-spin' : ''}`} title="Sync with Cloud">
+                🔄
+              </button>
+              <button onClick={handleExportCSV} className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs active:scale-95 transition" title="Export CSV">
                 📥
               </button>
             </div>
@@ -795,7 +824,7 @@
             </div>
           )}
 
-          {/* Quick Golfer Rolodex Modal */}
+          {/* Golfer Rolodex Modal */}
           {showRosterPickerModal && (
             <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 w-full max-w-xs space-y-3 shadow-2xl">
@@ -963,7 +992,7 @@
                   </div>
                 </div>
 
-                {/* Bottom Half Ergonomic Scoring Pad */}
+                {/* Bottom Half Scoring Pad */}
                 {accessMode === 'rw' ? (
                   <div className="flex-1 flex flex-col justify-between p-2 gap-1.5 overflow-hidden">
                     
@@ -1018,7 +1047,7 @@
                   <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-2">
                     <div className="p-3 bg-blue-950/40 border border-blue-500/30 rounded-xl max-w-xs">
                       <h3 className="text-xs font-black text-white">Live Spectator Mode</h3>
-                      <p className="text-[11px] text-blue-300">Live scorecards update in real time.</p>
+                      <p className="text-[11px] text-blue-300">Syncing with Trip Cloud ID: <span className="font-bold text-white">{tripId}</span></p>
                     </div>
                     <button onClick={() => setAccessMode('rw')} className="px-5 py-2 rounded-xl bg-emerald-600 font-bold text-slate-950 text-xs shadow active:scale-95 transition">Unlock Scoring</button>
                   </div>
@@ -1063,7 +1092,7 @@
               </div>
             )}
 
-            {/* TAB 3: COURSE SETUP & PERMANENT LIBRARY */}
+            {/* TAB 3: COURSE SETUP & LIBRARY */}
             {activeTab === 'setup' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 <div className="flex items-center justify-between">
@@ -1180,7 +1209,7 @@
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-sm font-black text-white">Active Round Lineup</h2>
-                    <p className="text-[11px] text-slate-400">{players.length} golfers today</p>
+                    <p className="text-[11px] text-slate-400">{players.length} golfers in today's match</p>
                   </div>
                   
                   {accessMode === 'rw' && (
@@ -1272,28 +1301,63 @@
               </div>
             )}
 
-            {/* TAB 5: SYNC & RESET */}
+            {/* TAB 5: CLOUD SYNC & UNIVERSAL SHARING */}
             {activeTab === 'sync' && (
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
-                <h2 className="text-sm font-black text-white">Cloud Sync & Export</h2>
-
-                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-bold text-slate-300 block">Live Share Links</span>
-                  <button onClick={() => handleGenerateShareLink('ro')} className="w-full py-2 rounded-lg bg-blue-600 font-bold text-xs text-white active:scale-95 transition">Copy Viewer Link (Read Only)</button>
-                  <button onClick={() => handleGenerateShareLink('rw')} className="w-full py-2 rounded-lg bg-emerald-600 font-black text-xs text-slate-950 active:scale-95 transition">Copy Scorer Link (Read / Write)</button>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-black text-white">Trip Cloud Synchronization</h2>
+                  {lastCloudSyncTime && (
+                    <span className="text-[10px] text-emerald-400 font-mono">Synced: {lastCloudSyncTime}</span>
+                  )}
                 </div>
 
+                {/* TRIP CODE CONFIGURATION */}
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-bold text-white block">Google Sheets Webhook Sync</span>
-                  <input type="text" placeholder="https://script.google.com/macros/s/.../exec" value={sheetsWebhookUrl} onChange={e => setSheetsWebhookUrl(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white outline-none" />
-                  <button onClick={handlePushToSheets} disabled={isSyncing} className="w-full py-2 rounded-lg bg-blue-600 font-bold text-xs text-white shadow active:scale-95 transition">
-                    {isSyncing ? 'Syncing...' : 'Push Scores to Google Sheet Now'}
+                  <span className="text-[11px] font-black uppercase text-emerald-400 tracking-wider block">Trip Cloud Room ID</span>
+                  <p className="text-[10px] text-slate-400">All players and windows sharing this Trip ID will stay synced to the exact same round.</p>
+                  
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={tripId}
+                      onChange={(e) => setTripId(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+                      placeholder="e.g. Bandon2026"
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold text-white outline-none focus:border-emerald-500"
+                    />
+                    <button 
+                      onClick={() => fetchFromCloud(sheetsWebhookUrl, tripId)}
+                      disabled={isSyncing}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs rounded-lg active:scale-95 transition"
+                    >
+                      {isSyncing ? 'Loading...' : 'Connect'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* UNIVERSAL AUTO-CONNECT SHARE LINKS */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+                  <span className="text-[11px] font-bold text-slate-300 block">Universal Auto-Connect Links</span>
+                  <p className="text-[10px] text-slate-400">Send these links to players. Opening the link will instantly connect their browser to your Trip Cloud ID.</p>
+                  <button onClick={() => handleGenerateUniversalLink('ro')} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white active:scale-95 transition">
+                    📱 Copy Viewer Link (Any Browser / Device)
+                  </button>
+                  <button onClick={() => handleGenerateUniversalLink('rw')} className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black text-xs text-slate-950 active:scale-95 transition">
+                    ✏️ Copy Scorer Link (Read / Write)
                   </button>
                 </div>
 
+                {/* GOOGLE SHEETS WEBHOOK ENDPOINT */}
                 <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-[11px] font-bold text-slate-300 block">Active Round Management</span>
-                  <p className="text-[10px] text-slate-400">Scores save automatically. Tapping reset will clear active scores, but your course library and player rolodex will remain intact.</p>
+                  <span className="text-[11px] font-bold text-white block">Google Sheets Webhook Endpoint</span>
+                  <input type="text" placeholder="https://script.google.com/macros/s/.../exec" value={sheetsWebhookUrl} onChange={e => setSheetsWebhookUrl(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white outline-none" />
+                  <button onClick={() => pushToCloud()} disabled={isSyncing} className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-black text-xs text-slate-950 shadow active:scale-95 transition">
+                    {isSyncing ? 'Saving to Cloud...' : '☁️ Push Updates to Google Sheet Now'}
+                  </button>
+                </div>
+
+                {/* RESET CURRENT ROUND */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+                  <span className="text-[11px] font-bold text-slate-300 block">Round Controls</span>
                   <div className="flex gap-2">
                     <button onClick={handleExportCSV} className="flex-1 py-1.5 rounded-lg bg-slate-800 text-xs font-bold border border-slate-700 active:scale-95 transition">Download CSV</button>
                     {accessMode === 'rw' && (

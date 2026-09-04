@@ -49,9 +49,9 @@
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     const DEFAULT_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxZFxZ9Dc93Wo3jnccO_Te-6t1jrrsv6WwxLZkuT5XCIOfSpeQCDqjfwo-KK6Nl0qxffQ/exec';
-    const STORAGE_KEY_ROUND = 'GOLF_TRIP_ACTIVE_ROUND_STABLE_V3';
-    const STORAGE_KEY_COURSES = 'GOLF_TRIP_COURSES_LIB_STABLE_V3';
-    const STORAGE_KEY_ROSTER = 'GOLF_TRIP_ROSTER_LIB_STABLE_V3';
+    const STORAGE_KEY_ROUND = 'GOLF_TRIP_ACTIVE_ROUND_STABLE_V4';
+    const STORAGE_KEY_COURSES = 'GOLF_TRIP_COURSES_LIB_STABLE_V4';
+    const STORAGE_KEY_ROSTER = 'GOLF_TRIP_ROSTER_LIB_STABLE_V4';
 
     const DEFAULT_COURSES = [
       {
@@ -295,7 +295,7 @@
             }
           }
         } catch (err) {
-          console.warn('Cloud pull skipped (offline)');
+          console.warn('Cloud poll skipped (offline)');
         } finally {
           setIsSyncing(false);
         }
@@ -344,7 +344,7 @@
         }
       }, [accessMode]);
 
-      // Bulletproof Permanent Auto-Save
+      // Permanent Auto-Save
       useEffect(() => {
         if (isInitialMount.current) {
           isInitialMount.current = false;
@@ -542,7 +542,7 @@
         }
       };
 
-      // Player Metrics Calculations
+      // Individual Player Metrics Calculations
       const playerStats = useMemo(() => {
         return players.map(player => {
           let totalGross = 0, totalNet = 0, totalPar = 0, holesPlayed = 0, stablefordPoints = 0, skinsWon = 0;
@@ -605,65 +605,72 @@
         });
       }, [players, holes, holesCount, getRawScore]);
 
-      const gameEngine = useMemo(() => {
-        const tA = playerStats.filter(p => p.team === 'A');
-        const tB = playerStats.filter(p => p.team === 'B');
+      // DYNAMIC MULTI-FORMAT TEAM SCORING ENGINE
+      const teamGameSummary = useMemo(() => {
+        const teamA = playerStats.filter(p => p.team === 'A');
+        const teamB = playerStats.filter(p => p.team === 'B');
 
-        let teamANet = 0, teamBNet = 0;
+        // 1. Best Ball / Scramble / Shamble net totals
+        let tANet = 0, tBNet = 0, holesPlayed = 0;
         holes.slice(0, holesCount).forEach(h => {
-          const aNets = tA.map(p => {
+          const aNets = teamA.map(p => {
             const raw = getRawScore(h.num, p.id);
-            return raw ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
+            return raw !== null ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
           }).filter(s => s !== null);
 
-          const bNets = tB.map(p => {
+          const bNets = teamB.map(p => {
             const raw = getRawScore(h.num, p.id);
-            return raw ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
+            return raw !== null ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
           }).filter(s => s !== null);
 
-          if (aNets.length > 0) teamANet += Math.min(...aNets);
-          if (bNets.length > 0) teamBNet += Math.min(...bNets);
+          if (aNets.length > 0 || bNets.length > 0) holesPlayed++;
+          if (aNets.length > 0) tANet += Math.min(...aNets);
+          if (bNets.length > 0) tBNet += Math.min(...bNets);
         });
 
-        // Vegas
-        let vegasTeamA = 0, vegasTeamB = 0;
+        // 2. Vegas High-Low Calculation
+        let vegasA = 0, vegasB = 0;
         holes.slice(0, holesCount).forEach(h => {
-          const sA1 = getRawScore(h.num, tA[0]?.id);
-          const sA2 = getRawScore(h.num, tA[1]?.id);
-          const sB1 = getRawScore(h.num, tB[0]?.id);
-          const sB2 = getRawScore(h.num, tB[1]?.id);
+          const sA1 = getRawScore(h.num, teamA[0]?.id);
+          const sA2 = getRawScore(h.num, teamA[1]?.id);
+          const sB1 = getRawScore(h.num, teamB[0]?.id);
+          const sB2 = getRawScore(h.num, teamB[1]?.id);
 
-          if (sA1 && sA2 && sB1 && sB2) {
+          if (sA1 !== null && sA2 !== null && sB1 !== null && sB2 !== null) {
             let aLow = Math.min(sA1, sA2), aHigh = Math.max(sA1, sA2);
             let bLow = Math.min(sB1, sB2), bHigh = Math.max(sB1, sB2);
             let valA = parseInt(`${aLow}${aHigh}`, 10);
             let valB = parseInt(`${bLow}${bHigh}`, 10);
 
+            // Birdie Flip Rule: Birdie or better inverts opponent's score
             if (aLow < h.par && bLow >= h.par) valB = parseInt(`${bHigh}${bLow}`, 10);
             else if (bLow < h.par && aLow >= h.par) valA = parseInt(`${aHigh}${aLow}`, 10);
 
             const diff = valB - valA;
-            if (diff > 0) vegasTeamA += diff;
-            else if (diff < 0) vegasTeamB += Math.abs(diff);
+            if (diff > 0) vegasA += diff;
+            else if (diff < 0) vegasB += Math.abs(diff);
           }
         });
 
-        // Skins
+        // 3. Skins
         const skinsList = [];
         let carryover = 0;
+        let skinsWonA = 0, skinsWonB = 0;
         holes.slice(0, holesCount).forEach(h => {
           const holeScores = players.map(p => {
             const raw = getRawScore(h.num, p.id);
-            return raw ? { player: p, net: raw - getStrokesGiven(p.hcp, h.hcp, holesCount) } : null;
+            return raw !== null ? { player: p, net: raw - getStrokesGiven(p.hcp, h.hcp, holesCount) } : null;
           }).filter(Boolean);
 
           let winner = null;
           let skinValue = 1 + carryover;
           if (holeScores.length === players.length && players.length > 0) {
-            const min = Math.min(...holeScores.map(s => s.net));
-            const winners = holeScores.filter(s => s.net === min);
+            const minNet = Math.min(...holeScores.map(s => s.net));
+            const winners = holeScores.filter(s => s.net === minNet);
             if (winners.length === 1) {
               winner = winners[0].player;
+              if (winner.team === 'A') skinsWonA += skinValue;
+              else if (winner.team === 'B') skinsWonB += skinValue;
               carryover = 0;
             } else {
               carryover += 1;
@@ -672,12 +679,140 @@
           skinsList.push({ hole: h.num, par: h.par, skinValue, winner, carryover });
         });
 
+        // 4. Stableford & Quota
+        const stablefordA = teamA.reduce((sum, p) => sum + p.stablefordPoints, 0);
+        const stablefordB = teamB.reduce((sum, p) => sum + p.stablefordPoints, 0);
+
+        const quotaDiffA = teamA.reduce((sum, p) => sum + (p.rawQuotaDiff || 0), 0);
+        const quotaDiffB = teamB.reduce((sum, p) => sum + (p.rawQuotaDiff || 0), 0);
+
+        // 5. Nassau & Match Play
+        let matchHolesWonA = 0, matchHolesWonB = 0;
+        let nassauF9A = 0, nassauF9B = 0, nassauB9A = 0, nassauB9B = 0;
+        holes.slice(0, holesCount).forEach(h => {
+          const aNets = teamA.map(p => {
+            const raw = getRawScore(h.num, p.id);
+            return raw !== null ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
+          }).filter(s => s !== null);
+          const bNets = teamB.map(p => {
+            const raw = getRawScore(h.num, p.id);
+            return raw !== null ? raw - getStrokesGiven(p.hcp, h.hcp, holesCount) : null;
+          }).filter(s => s !== null);
+
+          if (aNets.length > 0 && bNets.length > 0) {
+            const minA = Math.min(...aNets);
+            const minB = Math.min(...bNets);
+            if (minA < minB) {
+              matchHolesWonA++;
+              if (h.num <= 9) nassauF9A++; else nassauB9A++;
+            } else if (minB < minA) {
+              matchHolesWonB++;
+              if (h.num <= 9) nassauF9B++; else nassauB9B++;
+            }
+          }
+        });
+
+        // Formatted score tags according to activeGame
+        let teamAScoreDisplay = '';
+        let teamBScoreDisplay = '';
+        let teamASub = '';
+        let teamBSub = '';
+        let statusText = '';
+
+        switch (activeGame) {
+          case 'vegas':
+            teamAScoreDisplay = `${vegasA} pts`;
+            teamBScoreDisplay = `${vegasB} pts`;
+            teamASub = 'Vegas Total';
+            teamBSub = 'Vegas Total';
+            const vDiff = vegasA - vegasB;
+            statusText = vDiff > 0 ? `${teams[0]?.name} +${vDiff} pts ($${(vDiff * (pointsWager || 1)).toFixed(0)})` :
+                         vDiff < 0 ? `${teams[1]?.name} +${Math.abs(vDiff)} pts ($${(Math.abs(vDiff) * (pointsWager || 1)).toFixed(0)})` :
+                         'All Square';
+            break;
+
+          case 'skins':
+            teamAScoreDisplay = `${skinsWonA} skins`;
+            teamBScoreDisplay = `${skinsWonB} skins`;
+            teamASub = `$${skinsWonA * pointsWager}`;
+            teamBSub = `$${skinsWonB * pointsWager}`;
+            statusText = carryover > 0 ? `Carryover: ${carryover} skins ($${carryover * pointsWager})` :
+                         skinsWonA > skinsWonB ? `${teams[0]?.name} +${skinsWonA - skinsWonB}` :
+                         skinsWonB > skinsWonA ? `${teams[1]?.name} +${skinsWonB - skinsWonA}` : 'Tied';
+            break;
+
+          case 'stableford':
+            teamAScoreDisplay = `${stablefordA} pts`;
+            teamBScoreDisplay = `${stablefordB} pts`;
+            teamASub = 'Stableford Total';
+            teamBSub = 'Stableford Total';
+            statusText = stablefordA > stablefordB ? `${teams[0]?.name} +${stablefordA - stablefordB}` :
+                         stablefordB > stablefordA ? `${teams[1]?.name} +${stablefordB - stablefordA}` : 'Tied';
+            break;
+
+          case 'quota':
+            teamAScoreDisplay = quotaDiffA >= 0 ? `+${quotaDiffA.toFixed(1)}` : quotaDiffA.toFixed(1);
+            teamBScoreDisplay = quotaDiffB >= 0 ? `+${quotaDiffB.toFixed(1)}` : quotaDiffB.toFixed(1);
+            teamASub = 'Team Quota +/-';
+            teamBSub = 'Team Quota +/-';
+            statusText = quotaDiffA > quotaDiffB ? `${teams[0]?.name} leads` :
+                         quotaDiffB > quotaDiffA ? `${teams[1]?.name} leads` : 'Tied';
+            break;
+
+          case 'match_play':
+            const mDiff = matchHolesWonA - matchHolesWonB;
+            teamAScoreDisplay = `${matchHolesWonA} holes`;
+            teamBScoreDisplay = `${matchHolesWonB} holes`;
+            teamASub = 'Holes Won';
+            teamBSub = 'Holes Won';
+            statusText = mDiff > 0 ? `${teams[0]?.name} ${mDiff} UP` :
+                         mDiff < 0 ? `${teams[1]?.name} ${Math.abs(mDiff)} UP` : 'All Square';
+            break;
+
+          case 'nassau':
+            const f9L = nassauF9A > nassauF9B ? 'A' : nassauF9B > nassauF9A ? 'B' : 'Tie';
+            const b9L = nassauB9A > nassauB9B ? 'A' : nassauB9B > nassauB9A ? 'B' : 'Tie';
+            teamAScoreDisplay = `${matchHolesWonA}W`;
+            teamBScoreDisplay = `${matchHolesWonB}W`;
+            teamASub = `F9:${nassauF9A} B9:${nassauB9A}`;
+            teamBSub = `F9:${nassauF9B} B9:${nassauB9B}`;
+            statusText = `F9: ${f9L} | B9: ${b9L} | Total: ${matchHolesWonA > matchHolesWonB ? 'A' : matchHolesWonB > matchHolesWonA ? 'B' : 'Tie'}`;
+            break;
+
+          case 'wolf':
+            teamAScoreDisplay = `${stablefordA} pts`;
+            teamBScoreDisplay = `${stablefordB} pts`;
+            teamASub = 'Wolf Total';
+            teamBSub = 'Wolf Total';
+            statusText = stablefordA > stablefordB ? `${teams[0]?.name} leads` :
+                         stablefordB > stablefordA ? `${teams[1]?.name} leads` : 'Tied';
+            break;
+
+          case 'best_ball':
+          case 'scramble':
+          case 'shamble':
+          default:
+            teamAScoreDisplay = `${tANet || 'E'} Net`;
+            teamBScoreDisplay = `${tBNet || 'E'} Net`;
+            teamASub = 'Best Ball Net';
+            teamBSub = 'Best Ball Net';
+            statusText = tANet < tBNet ? `${teams[0]?.name} +${tBNet - tANet} strokes` :
+                         tBNet < tANet ? `${teams[1]?.name} +${tANet - tBNet} strokes` :
+                         'All Square';
+            break;
+        }
+
         return {
-          bestBall: { teamANet, teamBNet },
-          vegas: { vegasTeamA, vegasTeamB, diff: vegasTeamA - vegasTeamB },
-          skins: { skinsList, currentCarryover: skinsList[skinsList.length - 1]?.carryover || 0 }
+          teamAScoreDisplay,
+          teamBScoreDisplay,
+          teamASub,
+          teamBSub,
+          statusText,
+          bestBall: { teamANet: tANet, teamBNet: tBNet, holesPlayed },
+          vegas: { vegasTeamA: vegasA, vegasTeamB: vegasB, diff: vegasA - vegasB },
+          skins: { skinsList, currentCarryover: carryover, skinsWonA, skinsWonB }
         };
-      }, [playerStats, holes, holesCount, getRawScore, players]);
+      }, [playerStats, holes, holesCount, getRawScore, players, teams, activeGame, pointsWager]);
 
       const renderScoreBadge = (gross, par) => {
         if (!gross) return <span className="text-gray-500 font-mono text-[11px]">-</span>;
@@ -862,58 +997,19 @@
                 {/* Visual Scorecard Top Half */}
                 <div className="flex-1 min-h-[140px] max-h-[48%] flex flex-col bg-slate-900/40 border-b border-slate-800/80 overflow-hidden">
                   
-                  {/* Standings Banner (Adapts dynamically to the active game) */}
+                  {/* Dynamic Standings Banner (Immediately reflects activeGame) */}
                   <div className="px-2 py-1 bg-slate-900 border-b border-slate-800/80 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-                    {(activeGame === 'best_ball' || activeGame === 'scramble' || activeGame === 'shamble' || activeGame === 'match_play') && (
-                      <>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
-                          <span>{teams[0]?.name}:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.bestBall.teamANet || 'E'} Net</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
-                          <span>{teams[1]?.name}:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.bestBall.teamBNet || 'E'} Net</span>
-                        </div>
-                      </>
-                    )}
-
-                    {activeGame === 'vegas' && (
-                      <>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
-                          <span>Eagles:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.vegas.vegasTeamA} pts</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
-                          <span>Birdies:</span>
-                          <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.vegas.vegasTeamB} pts</span>
-                        </div>
-                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-950/40 border border-purple-500/40 text-[11px] shrink-0 text-purple-300">
-                          <span>Diff:</span>
-                          <span className="font-bold text-white font-mono">{Math.abs(gameEngine.vegas.diff)} pts</span>
-                        </div>
-                      </>
-                    )}
-
-                    {activeGame === 'skins' && (
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-purple-500/40 bg-purple-950/40 text-purple-300 text-[11px] font-bold shrink-0">
-                        <span>Carryover:</span>
-                        <span className="font-mono text-white bg-slate-900 px-1 rounded">{gameEngine.skins.currentCarryover} Skins</span>
-                      </div>
-                    )}
-
-                    {activeGame === 'stableford' && (
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
-                        <span>Leader:</span>
-                        <span className="font-mono text-white bg-slate-900 px-1 rounded">{[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.name} ({[...playerStats].sort((a,b) => b.stablefordPoints - a.stablefordPoints)[0]?.stablefordPoints}p)</span>
-                      </div>
-                    )}
-
-                    {activeGame === 'quota' && (
-                      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
-                        <span>Leader:</span>
-                        <span className="font-mono text-white bg-slate-900 px-1 rounded">{[...playerStats].sort((a,b) => b.rawQuotaDiff - a.rawQuotaDiff)[0]?.name} ({[...playerStats].sort((a,b) => b.rawQuotaDiff - a.rawQuotaDiff)[0]?.quotaDiff})</span>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-emerald-500/40 bg-emerald-950/40 text-emerald-300 text-[11px] font-bold shrink-0">
+                      <span>{teams[0]?.name}:</span>
+                      <span className="font-mono text-white bg-slate-900 px-1 rounded">{teamGameSummary.teamAScoreDisplay}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-amber-500/40 bg-amber-950/40 text-amber-300 text-[11px] font-bold shrink-0">
+                      <span>{teams[1]?.name}:</span>
+                      <span className="font-mono text-white bg-slate-900 px-1 rounded">{teamGameSummary.teamBScoreDisplay}</span>
+                    </div>
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700 text-[11px] shrink-0 text-slate-300">
+                      <span className="font-bold text-white font-mono">{teamGameSummary.statusText}</span>
+                    </div>
                   </div>
 
                   {/* Physical Scorecard Table */}
@@ -1106,10 +1202,24 @@
                   <p className="text-[11px] text-slate-300">{GAME_TYPES.find(g => g.id === activeGame)?.desc}</p>
                 </div>
 
+                {/* Team Standing Dynamic Result Box */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[11px] text-slate-400 font-bold block">{teams[0]?.name}</span>
+                    <span className="text-xl font-mono font-black text-emerald-400">{teamGameSummary.teamAScoreDisplay}</span>
+                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">{teamGameSummary.teamASub}</span>
+                  </div>
+                  <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[11px] text-slate-400 font-bold block">{teams[1]?.name}</span>
+                    <span className="text-xl font-mono font-black text-amber-400">{teamGameSummary.teamBScoreDisplay}</span>
+                    <span className="text-[10px] text-slate-500 font-mono block mt-0.5">{teamGameSummary.teamBSub}</span>
+                  </div>
+                </div>
+
                 {/* Quick 1-Tap Game Switcher Grid */}
                 {accessMode === 'rw' && (
-                  <div className="space-y-1.5">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Choose Active Tournament Format:</span>
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Switch Format (Updates Scoring Immediately):</span>
                     <div className="grid grid-cols-2 gap-1.5">
                       {GAME_TYPES.map(g => {
                         const isSelected = g.id === activeGame;
@@ -1127,17 +1237,6 @@
                     </div>
                   </div>
                 )}
-
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
-                    <span className="text-[11px] text-slate-400 font-bold block">{teams[0]?.name}</span>
-                    <span className="text-xl font-mono font-black text-emerald-400">{gameEngine.bestBall.teamANet} Net</span>
-                  </div>
-                  <div className="p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-center">
-                    <span className="text-[11px] text-slate-400 font-bold block">{teams[1]?.name}</span>
-                    <span className="text-xl font-mono font-black text-amber-400">{gameEngine.bestBall.teamBNet} Net</span>
-                  </div>
-                </div>
               </div>
             )}
 
